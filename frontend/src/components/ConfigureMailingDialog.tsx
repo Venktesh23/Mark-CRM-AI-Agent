@@ -14,6 +14,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import type { GeneratedEmail } from "@/lib/mock-api";
+import type { SendTimeSuggestion } from "@/lib/api";
 
 interface MailingConfig {
   fromEmail: string;
@@ -28,6 +29,8 @@ interface ConfigureMailingDialogProps {
   emails: GeneratedEmail[];
   emailAssignments: Record<string, string[]>;
   defaultFromEmail?: string;
+  sendTimeByEmail?: Record<string, SendTimeSuggestion>;
+  sendTimeReasoning?: string | null;
   onSend: (config: MailingConfig) => void;
   isSending: boolean;
 }
@@ -38,6 +41,8 @@ export default function ConfigureMailingDialog({
   emails,
   emailAssignments,
   defaultFromEmail = "",
+  sendTimeByEmail = {},
+  sendTimeReasoning = null,
   onSend,
   isSending,
 }: ConfigureMailingDialogProps) {
@@ -113,6 +118,13 @@ export default function ConfigureMailingDialog({
 
             <Separator />
 
+            {sendTimeReasoning && (
+              <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
+                <p className="text-[11px] font-medium text-foreground">Send-Time Optimization</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">{sendTimeReasoning}</p>
+              </div>
+            )}
+
             {/* Per-email config */}
             <div className="space-y-3">
               <h3 className="text-xs font-semibold font-sans uppercase tracking-wider text-muted-foreground">
@@ -187,6 +199,17 @@ export default function ConfigureMailingDialog({
                           className="text-xs h-8 bg-muted/60 border-border"
                         />
                       </div>
+
+                      {sendTimeByEmail[email.id] && (
+                        <div className="rounded border border-border bg-muted/30 px-3 py-2">
+                          <p className="text-[10px] font-medium text-foreground">
+                            Recommended send window: {sendTimeByEmail[email.id].local_window} ({sendTimeByEmail[email.id].timezone})
+                          </p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">
+                            {sendTimeByEmail[email.id].rationale}
+                          </p>
+                        </div>
+                      )}
 
                       <div className="space-y-1.5">
                         <label className="text-[11px] font-medium text-foreground">

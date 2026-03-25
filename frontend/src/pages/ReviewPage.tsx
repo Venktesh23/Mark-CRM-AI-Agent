@@ -4,16 +4,17 @@ import { ArrowRight, Sparkles, Pencil, Loader2, AlertCircle } from "lucide-react
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useCampaignStore } from "@/lib/campaign-store";
 import { useCampaignsStore } from "@/lib/campaigns-list-store";
-import { editEmail } from "@/lib/api";
+import { editEmail, localizeCampaign } from "@/lib/api";
 import { useNavigate } from "react-router-dom";
 import { toast } from "@/hooks/use-toast";
 import type { GeneratedEmail } from "@/lib/api";
 import { useRequireGeneratedEmails } from "@/features/campaigns/use-require-generated-emails";
 import { getUserErrorMessage } from "@/core/errors/user-message";
+import { useBrandStore } from "@/lib/brand-store";
 
 function EmailPreviewCard({
   email,
@@ -117,6 +118,9 @@ export function EmailEditorModal({
       <DialogContent className="max-w-6xl h-[85vh] flex flex-col p-0">
         <DialogHeader className="px-6 py-4 border-b border-border flex-shrink-0">
           <DialogTitle className="text-base font-semibold">{email.subject}</DialogTitle>
+          <DialogDescription className="sr-only">
+            Preview, edit, and approve this generated campaign email.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-1 overflow-hidden">
@@ -202,10 +206,15 @@ export function EmailEditorModal({
 
 export default function ReviewPage() {
   const navigate = useNavigate();
-  const { generatedEmails, prompt, generationReport, setStep, updateEmailHtml } = useCampaignStore();
+  const { generatedEmails, prompt, generationReport, setStep, updateEmailHtml, updateEmailContent } = useCampaignStore();
   const { addCampaign } = useCampaignsStore();
+  const brand = useBrandStore((s) => s.brand);
   const [selectedEmail, setSelectedEmail] = useState<GeneratedEmail | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [localizeLanguage, setLocalizeLanguage] = useState("Spanish");
+  const [localizeRegion, setLocalizeRegion] = useState("");
+  const [isLocalizing, setIsLocalizing] = useState(false);
+  const [localizeReasoning, setLocalizeReasoning] = useState<string | null>(null);
 
   const handleEmailSaved = (emailId: string, newHtml: string) => {
     // 1. Persist into Zustand so SendPage uses the edited HTML.
@@ -245,9 +254,51 @@ export default function ReviewPage() {
       approvals: {},
       emailAssignments: {},
       aiReport: generationReport,
+      sendTimePlan: null,
+      repurposedContent: null,
     });
     setStep(1);
     navigate(`/campaigns/${id}`);
+  };
+
+  const handleLocalizeAll = async () => {
+    if (!generatedEmails.length) return;
+    setIsLocalizing(true);
+    try {
+      const result = await localizeCampaign({
+        emails: generatedEmails.map((email) => ({
+          id: email.id,
+          subject: email.subject,
+          html_content: email.htmlContent,
+          target_group: email.summary.targetGroup,
+        })),
+        language: localizeLanguage,
+        region: localizeRegion,
+        brand_voice: brand.voiceGuidelines,
+        legal_footer: brand.legalFooter,
+      });
+      for (const localized of result.emails) {
+        const existing = generatedEmails.find((email) => email.id === localized.id);
+        if (!existing) continue;
+        updateEmailContent(localized.id, {
+          subject: localized.subject || existing.subject,
+          htmlContent: localized.html_content || existing.htmlContent,
+        });
+      }
+      setLocalizeReasoning(result.reasoning || null);
+      toast({
+        title: "Localization complete",
+        description: `Localized ${result.emails.length} emails to ${result.language}${result.region ? ` (${result.region})` : ""}.`,
+      });
+    } catch (err) {
+      toast({
+        title: "Localization failed",
+        description: getUserErrorMessage(err, "Could not localize campaign emails."),
+        variant: "destructive",
+      });
+    } finally {
+      setIsLocalizing(false);
+    }
   };
 
   return (
@@ -306,6 +357,44 @@ export default function ReviewPage() {
           </CardContent>
         </Card>
       ) : null}
+
+      <Card className="border-border">
+        <CardHeader>
+          <CardTitle className="text-sm">Localization Agent</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Textarea
+              value={localizeLanguage}
+              onChange={(e) => setLocalizeLanguage(e.target.value)}
+              className="min-h-[52px] text-sm"
+              placeholder="Target language"
+            />
+            <Textarea
+              value={localizeRegion}
+              onChange={(e) => setLocalizeRegion(e.target.value)}
+              className="min-h-[52px] text-sm"
+              placeholder="Target region (optional)"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={handleLocalizeAll} disabled={isLocalizing || !localizeLanguage.trim()}>
+              {isLocalizing ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Localizing…
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Localize All Emails
+                </>
+              )}
+            </Button>
+          </div>
+          {localizeReasoning && <p className="text-xs text-muted-foreground">{localizeReasoning}</p>}
+        </CardContent>
+      </Card>
 
       <motion.div
         initial={{ opacity: 0 }}

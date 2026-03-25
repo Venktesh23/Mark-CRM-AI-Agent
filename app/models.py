@@ -410,3 +410,345 @@ class RecipientRecommendResponse(BaseModel):
         default="",
         description="Brief explanation of how contacts were matched.",
     )
+
+
+class ComplianceEmailPayload(BaseModel):
+    id: str
+    subject: str
+    html_content: str
+
+
+class ComplianceAssistantRequest(BaseModel):
+    emails: list[ComplianceEmailPayload]
+    banned_phrases: list[str] = Field(default_factory=list)
+    required_phrases: list[str] = Field(default_factory=list)
+    legal_footer: str = ""
+
+
+class ComplianceEmailResult(BaseModel):
+    id: str
+    issues: list[str] = Field(default_factory=list)
+    risk_flags: list[str] = Field(default_factory=list)
+    fixes: list[str] = Field(default_factory=list)
+    score: int = Field(ge=0, le=100, default=100)
+
+
+class ComplianceAssistantResponse(BaseModel):
+    passed: bool
+    overall_score: int = Field(ge=0, le=100)
+    summary: str
+    emails: list[ComplianceEmailResult] = Field(default_factory=list)
+
+
+class VariantPredictRequest(BaseModel):
+    subject_options: list[str] = Field(default_factory=list)
+    cta_options: list[str] = Field(default_factory=list)
+    audience: str = ""
+    offer: str = ""
+    objective: str = ""
+
+
+class ScoredVariant(BaseModel):
+    text: str
+    score: int = Field(ge=0, le=100)
+    rationale: str = ""
+
+
+class VariantPredictResponse(BaseModel):
+    best_subject: str = ""
+    best_cta: str = ""
+    subjects: list[ScoredVariant] = Field(default_factory=list)
+    ctas: list[ScoredVariant] = Field(default_factory=list)
+
+
+class PerformanceCopilotRequest(BaseModel):
+    campaign_name: str
+    prompt: str = ""
+    sent_count: int = 0
+    failed_count: int = 0
+    open_rate: Optional[float] = None
+    click_rate: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class PerformanceCopilotResponse(BaseModel):
+    summary: str
+    wins: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
+class SegmentDiscoveryRequest(BaseModel):
+    contacts_csv: str
+    max_segments: int = Field(default=8, ge=1, le=20)
+    campaign_prompt: str = ""
+
+
+class DiscoveredSegment(BaseModel):
+    id: str
+    name: str
+    filter_label: str
+    description: str = ""
+    emails: list[str] = Field(default_factory=list)
+    confidence: int = Field(default=70, ge=0, le=100)
+    recommended_for: str = ""
+
+
+class SegmentDiscoveryResponse(BaseModel):
+    segments: list[DiscoveredSegment] = Field(default_factory=list)
+    reasoning: str = ""
+
+
+class SmartBriefRequest(BaseModel):
+    prompt: str = Field(..., min_length=5)
+
+
+class SmartBrief(BaseModel):
+    campaign_name: str = ""
+    objective: str = ""
+    target_audience: str = ""
+    offer: str = ""
+    primary_kpi: str = "revenue"
+    geo_scope: str = "Global"
+    language: str = "English"
+    tone: str = "Professional and friendly"
+    compliance_notes: str = ""
+    send_window: str = ""
+    number_of_emails: int = Field(default=3, ge=1, le=10)
+    key_points: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+
+
+class SmartBriefResponse(BaseModel):
+    brief: SmartBrief
+    questions: list[str] = Field(default_factory=list)
+
+
+class SendTimeVariant(BaseModel):
+    email_id: str
+    subject: str = ""
+    target_group: str = ""
+    recipient_count: int = Field(default=0, ge=0)
+
+
+class SendTimeOptimizeRequest(BaseModel):
+    emails: list[SendTimeVariant] = Field(default_factory=list)
+    contacts_csv: str
+    campaign_prompt: str = ""
+
+
+class SendTimeSuggestion(BaseModel):
+    email_id: str
+    timezone: str
+    local_window: str
+    recommended_hour_local: int = Field(ge=0, le=23)
+    rationale: str
+
+
+class SendTimeOptimizeResponse(BaseModel):
+    suggestions: list[SendTimeSuggestion] = Field(default_factory=list)
+    global_reasoning: str = ""
+
+
+class VoiceTrainRequest(BaseModel):
+    brand_name: str = ""
+    current_voice: str = ""
+    campaign_examples: list[str] = Field(default_factory=list)
+    approved_html_samples: list[str] = Field(default_factory=list)
+
+
+class VoiceProfile(BaseModel):
+    style_summary: str = ""
+    do_list: list[str] = Field(default_factory=list)
+    dont_list: list[str] = Field(default_factory=list)
+    vocabulary: list[str] = Field(default_factory=list)
+    sample_lines: list[str] = Field(default_factory=list)
+    confidence: int = Field(default=65, ge=0, le=100)
+
+
+class VoiceTrainResponse(BaseModel):
+    profile: VoiceProfile
+    reasoning: str = ""
+
+
+class LocalizeEmailPayload(BaseModel):
+    id: str
+    subject: str
+    html_content: str
+    target_group: str = ""
+
+
+class LocalizeCampaignRequest(BaseModel):
+    emails: list[LocalizeEmailPayload] = Field(default_factory=list)
+    language: str
+    region: str = ""
+    brand_voice: str = ""
+    legal_footer: str = ""
+
+
+class LocalizedEmail(BaseModel):
+    id: str
+    subject: str
+    html_content: str
+    notes: str = ""
+
+
+class LocalizeCampaignResponse(BaseModel):
+    language: str
+    region: str = ""
+    emails: list[LocalizedEmail] = Field(default_factory=list)
+    reasoning: str = ""
+
+
+class RepurposeRequest(BaseModel):
+    campaign_name: str = ""
+    objective: str = ""
+    channels: list[str] = Field(default_factory=list)
+    emails: list[LocalizeEmailPayload] = Field(default_factory=list)
+
+
+class RepurposedAsset(BaseModel):
+    channel: str
+    title: str
+    body: str
+    cta: str = ""
+
+
+class RepurposeResponse(BaseModel):
+    assets: list[RepurposedAsset] = Field(default_factory=list)
+    reasoning: str = ""
+
+
+class OutcomeRecordRequest(BaseModel):
+    campaign_name: str = ""
+    prompt: str = ""
+    audience: str = ""
+    subject: str = ""
+    cta: str = ""
+    open_rate: Optional[float] = None
+    click_rate: Optional[float] = None
+    conversion_rate: Optional[float] = None
+    language: str = ""
+    segment: str = ""
+    notes: str = ""
+
+
+class OutcomeRecord(BaseModel):
+    id: str
+    campaign_name: str
+    prompt: str
+    audience: str
+    subject: str
+    cta: str
+    open_rate: Optional[float] = None
+    click_rate: Optional[float] = None
+    conversion_rate: Optional[float] = None
+    language: str = ""
+    segment: str = ""
+    notes: str = ""
+    score: int = Field(default=0, ge=0, le=100)
+
+
+class OutcomeRecordResponse(BaseModel):
+    stored: bool
+    score: int = Field(ge=0, le=100)
+    total_records: int = Field(ge=0)
+
+
+class MemoryRetrieveRequest(BaseModel):
+    prompt: str = ""
+    audience: str = ""
+    objective: str = ""
+    limit: int = Field(default=5, ge=1, le=20)
+
+
+class MemorySnippet(BaseModel):
+    snippet: str
+    score: int = Field(ge=0, le=100)
+    tags: list[str] = Field(default_factory=list)
+
+
+class MemoryRetrieveResponse(BaseModel):
+    snippets: list[MemorySnippet] = Field(default_factory=list)
+    reasoning: str = ""
+
+
+class ExperimentStartRequest(BaseModel):
+    experiment_name: str
+    metric: str = "click_rate"
+    variants: list[str] = Field(default_factory=list, min_length=2, max_length=10)
+
+
+class ExperimentVariantStat(BaseModel):
+    variant: str
+    impressions: int = Field(default=0, ge=0)
+    clicks: int = Field(default=0, ge=0)
+    conversions: int = Field(default=0, ge=0)
+    rate: float = 0.0
+
+
+class ExperimentStartResponse(BaseModel):
+    experiment_id: str
+    metric: str
+    variants: list[ExperimentVariantStat] = Field(default_factory=list)
+
+
+class ExperimentRecordRequest(BaseModel):
+    experiment_id: str
+    variant: str
+    impressions: int = Field(default=0, ge=0)
+    clicks: int = Field(default=0, ge=0)
+    conversions: int = Field(default=0, ge=0)
+
+
+class ExperimentStatusResponse(BaseModel):
+    experiment_id: str
+    metric: str
+    variants: list[ExperimentVariantStat] = Field(default_factory=list)
+    winner: str = ""
+    confidence: int = Field(default=0, ge=0, le=100)
+    completed: bool = False
+
+
+class AgentMetricItem(BaseModel):
+    agent: str
+    calls: int = Field(default=0, ge=0)
+    success: int = Field(default=0, ge=0)
+    fallback: int = Field(default=0, ge=0)
+    avg_latency_ms: float = 0.0
+
+
+class AgentMetricsResponse(BaseModel):
+    metrics: list[AgentMetricItem] = Field(default_factory=list)
+    total_calls: int = Field(default=0, ge=0)
+
+
+class OrchestrationEmailPayload(BaseModel):
+    id: str
+    subject: str
+    target_group: str = ""
+    html_content: str = ""
+    recipient_count: int = Field(default=0, ge=0)
+
+
+class OrchestrateGrowthRequest(BaseModel):
+    campaign_name: str = ""
+    prompt: str = ""
+    audience: str = ""
+    objective: str = ""
+    offer: str = ""
+    contacts_csv: str = ""
+    emails: list[OrchestrationEmailPayload] = Field(default_factory=list)
+    banned_phrases: list[str] = Field(default_factory=list)
+    required_phrases: list[str] = Field(default_factory=list)
+    legal_footer: str = ""
+
+
+class OrchestrateGrowthResponse(BaseModel):
+    best_subject: str = ""
+    best_cta: str = ""
+    compliance_passed: bool = True
+    compliance_summary: str = ""
+    send_time_reasoning: str = ""
+    memory_snippets: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)

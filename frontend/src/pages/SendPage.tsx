@@ -1,10 +1,11 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
-import { Mail, Users, CheckCircle2, Settings2, Sparkles, Link2 } from "lucide-react";
+import { Mail, Users, CheckCircle2, Settings2, Sparkles, Link2, ShieldAlert, TrendingUp } from "lucide-react";
 import ConfigureMailingDialog from "@/components/ConfigureMailingDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { useCampaignStore } from "@/lib/campaign-store";
@@ -12,10 +13,22 @@ import { useHubSpotContactsStore } from "@/lib/hubspot-contacts-store";
 import { useHubSpotStore } from "@/lib/hubspot-store";
 import { scoreSegment } from "@/lib/crm-parser";
 import {
+  discoverAudienceSegments,
   getEmailConfig,
+  orchestrateGrowthLoop,
+  getPerformanceCopilot,
+  optimizeSendTimes,
+  predictVariants,
+  recordOutcome,
+  startExperiment,
+  runComplianceAssistant,
   sendCampaign,
   recommendRecipients,
   type CampaignSendTask,
+  type OrchestrateGrowthResponse,
+  type PerformanceCopilotResponse,
+  type DiscoveredSegment,
+  type SendTimeSuggestion,
 } from "@/lib/api";
 import { useNavigate, useLocation } from "react-router-dom";
 import { toast } from "@/hooks/use-toast";
@@ -25,6 +38,117 @@ import { safeAsync } from "@/core/async/safe-async";
 import { getHubspotAuthUrl } from "@/features/integrations/hubspot-client";
 import { useRequireGeneratedEmails } from "@/features/campaigns/use-require-generated-emails";
 import { getUserErrorMessage } from "@/core/errors/user-message";
+import { useBrandStore } from "@/lib/brand-store";
+
+type ContactProfile = Record<string, string>;
+
+function parseCsvRecords(csv: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let inQuote = false;
+
+  for (let i = 0; i < csv.length; i++) {
+    const ch = csv[i];
+    if (ch === '"') {
+      if (inQuote && csv[i + 1] === '"') {
+        field += '"';
+        i++;
+      } else {
+        inQuote = !inQuote;
+      }
+      continue;
+    }
+    if (ch === "," && !inQuote) {
+      row.push(field);
+      field = "";
+      continue;
+    }
+    if ((ch === "\n" || ch === "\r") && !inQuote) {
+      if (ch === "\r" && csv[i + 1] === "\n") i++;
+      row.push(field);
+      field = "";
+      if (row.some((cell) => cell.trim().length > 0)) rows.push(row);
+      row = [];
+      continue;
+    }
+    field += ch;
+  }
+
+  row.push(field);
+  if (row.some((cell) => cell.trim().length > 0)) rows.push(row);
+  return rows;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function parseContactsCsvMap(csv: string | null): Map<string, ContactProfile> {
+  if (!csv?.trim()) return new Map();
+  const records = parseCsvRecords(csv.trim());
+  if (records.length < 2) return new Map();
+  const headers = records[0].map((h) => h.trim().toLowerCase());
+  const map = new Map<string, ContactProfile>();
+  for (const values of records.slice(1)) {
+    const profile: ContactProfile = {};
+    headers.forEach((h, idx) => {
+      profile[h] = (values[idx] ?? "").trim();
+    });
+    const email = (profile.email ?? "").toLowerCase();
+    if (email.includes("@")) map.set(email, profile);
+  }
+  return map;
+}
+
+function firstNonEmpty(...vals: Array<string | undefined>): string {
+  for (const val of vals) {
+    if (val && val.trim()) return val.trim();
+  }
+  return "";
+}
+
+function personalizeTemplate(html: string, profile: ContactProfile | undefined): string {
+  const firstName = firstNonEmpty(profile?.firstname, profile?.first_name, "there");
+  const lastName = firstNonEmpty(profile?.lastname, profile?.last_name, "");
+  const fullName = firstNonEmpty(`${firstName} ${lastName}`.trim(), firstName, "there");
+  const city = firstNonEmpty(profile?.city, "your area");
+  const country = firstNonEmpty(profile?.country, "your region");
+  const membership = firstNonEmpty(profile?.membership_level, "member");
+
+  const replacements: Record<string, string> = {
+    first_name: escapeHtml(firstName),
+    last_name: escapeHtml(lastName),
+    full_name: escapeHtml(fullName),
+    city: escapeHtml(city),
+    country: escapeHtml(country),
+    membership_level: escapeHtml(membership),
+  };
+
+  return html.replace(/\{\{\s*([a-zA-Z0-9_]+)(?:\|([^}]+))?\s*\}\}/g, (_, token: string, fallback?: string) => {
+    const key = token.toLowerCase();
+    const val = replacements[key];
+    if (val && val.trim()) return val.trim();
+    return escapeHtml((fallback ?? "").trim());
+  });
+}
+
+function extractCtaCandidates(html: string): string[] {
+  const anchorTexts = Array.from(html.matchAll(/<a\b[^>]*>(.*?)<\/a>/gis))
+    .map((m) => m[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  return Array.from(new Set(anchorTexts)).slice(0, 6);
+}
+
+function applyBestCta(html: string, cta: string): string {
+  if (!cta.trim()) return html;
+  return html.replace(/(<a\b[^>]*>)([\s\S]*?)(<\/a>)/i, `$1${cta}$3`);
+}
 
 export default function SendPage() {
   const navigate = useNavigate();
@@ -34,11 +158,13 @@ export default function SendPage() {
   const { updateCampaign, campaigns } = useCampaignsStore();
   const { segments, rawContactsCsv } = useHubSpotContactsStore();
   const { connected } = useHubSpotStore();
+  const brand = useBrandStore((s) => s.brand);
+  const campaignRecord = campaignId ? campaigns.find((c) => c.id === campaignId) ?? null : null;
 
   // Resolve the campaign prompt — prefer the saved campaign record, fall back to the in-flight store
-  const campaignPrompt = (campaignId ? campaigns.find((c) => c.id === campaignId)?.prompt : null) ?? storePrompt ?? null;
+  const campaignPrompt = campaignRecord?.prompt ?? storePrompt ?? null;
   const campaignGuardrailsPassed =
-    campaignId ? (campaigns.find((c) => c.id === campaignId)?.aiReport?.guardrails_passed ?? true) : true;
+    campaignRecord?.aiReport?.guardrails_passed ?? true;
   const [configuredFromEmail, setConfiguredFromEmail] = useState("");
 
   // Fetch the configured sender email from the backend once
@@ -54,21 +180,85 @@ export default function SendPage() {
   const [sent, setSent] = useState(false);
   const [showConfigDialog, setShowConfigDialog] = useState(false);
   const [selectedSegments, setSelectedSegments] = useState<Record<string, string[]>>({});
+  const [complianceSummary, setComplianceSummary] = useState<string | null>(null);
+  const [complianceBlockingIssues, setComplianceBlockingIssues] = useState<string[]>([]);
+  const [performanceCopilot, setPerformanceCopilot] = useState<PerformanceCopilotResponse | null>(null);
+  const [orchestration, setOrchestration] = useState<OrchestrateGrowthResponse | null>(null);
+  const [startedExperiments, setStartedExperiments] = useState<Array<{ emailId: string; experimentId: string }>>([]);
+  const [observedOpenRate, setObservedOpenRate] = useState("");
+  const [observedClickRate, setObservedClickRate] = useState("");
+  const [observedConversionRate, setObservedConversionRate] = useState("");
+  const [savingOutcomes, setSavingOutcomes] = useState(false);
+  const [outcomesSaved, setOutcomesSaved] = useState(false);
+  const [discoveredSegments, setDiscoveredSegments] = useState<DiscoveredSegment[]>([]);
+  const [segmentDiscoveryReasoning, setSegmentDiscoveryReasoning] = useState<string | null>(null);
+  const [sendTimeByEmail, setSendTimeByEmail] = useState<Record<string, SendTimeSuggestion>>({});
+  const [sendTimeReasoning, setSendTimeReasoning] = useState<string | null>(null);
+  const [isOptimizingSendTime, setIsOptimizingSendTime] = useState(false);
+
+  const mergedSegments = useMemo(() => {
+    const byId = new Map<string, typeof segments[number]>();
+    for (const seg of segments) byId.set(seg.id, seg);
+    for (const seg of discoveredSegments) {
+      if (!byId.has(seg.id)) {
+        byId.set(seg.id, {
+          id: seg.id,
+          name: seg.name,
+          filterLabel: seg.filter_label,
+          emails: seg.emails,
+        });
+      }
+    }
+    return Array.from(byId.values());
+  }, [segments, discoveredSegments]);
 
   const suggestedSegments = useMemo(() => {
     const result: Record<string, Set<string>> = {};
     for (const email of generatedEmails) {
       const suggested = new Set<string>();
-      for (const seg of segments) {
+      for (const seg of mergedSegments) {
         if (scoreSegment(seg, email.summary.targetGroup) > 0) suggested.add(seg.id);
       }
       result[email.id] = suggested;
     }
     return result;
-  }, [generatedEmails, segments]);
+  }, [generatedEmails, mergedSegments]);
 
   // Auto-trigger AI match on first render if contacts CSV is available
   const autoMatchRef = useRef(false);
+  useEffect(() => {
+    const plan = campaignRecord?.sendTimePlan;
+    if (!plan) return;
+    const byEmail: Record<string, SendTimeSuggestion> = {};
+    for (const suggestion of plan.suggestions ?? []) {
+      byEmail[suggestion.email_id] = suggestion;
+    }
+    setSendTimeByEmail(byEmail);
+    setSendTimeReasoning(plan.globalReasoning || null);
+  }, [campaignRecord]);
+
+  useEffect(() => {
+    if (!rawContactsCsv || generatedEmails.length === 0) {
+      setDiscoveredSegments([]);
+      setSegmentDiscoveryReasoning(null);
+      return;
+    }
+    safeAsync(async () => {
+      try {
+        const discovered = await discoverAudienceSegments({
+          contacts_csv: rawContactsCsv,
+          max_segments: 8,
+          campaign_prompt: campaignPrompt ?? "",
+        });
+        setDiscoveredSegments(discovered.segments ?? []);
+        setSegmentDiscoveryReasoning(discovered.reasoning || null);
+      } catch {
+        setDiscoveredSegments([]);
+        setSegmentDiscoveryReasoning(null);
+      }
+    });
+  }, [rawContactsCsv, generatedEmails.length, campaignPrompt]);
+
   useEffect(() => {
     if (autoMatchRef.current || !rawContactsCsv || generatedEmails.length === 0) return;
     autoMatchRef.current = true;
@@ -97,21 +287,21 @@ export default function SendPage() {
 
   // Fall back to keyword-segment matching only if no CSV is available
   useEffect(() => {
-    if (rawContactsCsv || segments.length === 0 || generatedEmails.length === 0) return;
+    if (rawContactsCsv || mergedSegments.length === 0 || generatedEmails.length === 0) return;
     const next: Record<string, string[]> = {};
     let anyApplied = false;
     for (const email of generatedEmails) {
       const suggested = [...(suggestedSegments[email.id] ?? [])];
       if (suggested.length === 0) continue;
       next[email.id] = suggested;
-      const allEmails = segments
+      const allEmails = mergedSegments
         .filter((s) => suggested.includes(s.id))
         .flatMap((s) => s.emails);
       setRecipients(email.id, Array.from(new Set(allEmails)));
       anyApplied = true;
     }
     if (anyApplied) setSelectedSegments(next);
-  }, [rawContactsCsv, segments, generatedEmails, setRecipients, suggestedSegments]);
+  }, [rawContactsCsv, mergedSegments, generatedEmails, setRecipients, suggestedSegments]);
 
   const hasGeneratedEmails = useRequireGeneratedEmails(generatedEmails.length, "/");
   if (!hasGeneratedEmails) return null;
@@ -132,7 +322,7 @@ export default function SendPage() {
         ? current.filter((id) => id !== segId)
         : [...current, segId];
 
-      const allEmails = segments
+      const allEmails = mergedSegments
         .filter((s) => updated.includes(s.id))
         .flatMap((s) => s.emails);
       setRecipients(emailId, Array.from(new Set(allEmails)));
@@ -181,7 +371,7 @@ export default function SendPage() {
     for (const email of generatedEmails) {
       const suggested = [...(suggestedSegments[email.id] ?? [])];
       next[email.id] = suggested;
-      const allEmails = segments
+      const allEmails = mergedSegments
         .filter((s) => suggested.includes(s.id))
         .flatMap((s) => s.emails);
       setRecipients(email.id, Array.from(new Set(allEmails)));
@@ -199,12 +389,60 @@ export default function SendPage() {
     (e) => (suggestedSegments[e.id]?.size ?? 0) > 0
   );
 
+  const handleOpenConfig = async () => {
+    if (!rawContactsCsv || generatedEmails.length === 0) {
+      setSendTimeByEmail({});
+      setSendTimeReasoning(null);
+      setShowConfigDialog(true);
+      return;
+    }
+    setIsOptimizingSendTime(true);
+    try {
+      const optimization = await optimizeSendTimes({
+        emails: generatedEmails.map((email) => ({
+          email_id: email.id,
+          subject: email.subject,
+          target_group: email.summary.targetGroup,
+          recipient_count: emailAssignments[email.id]?.length ?? 0,
+        })),
+        contacts_csv: rawContactsCsv,
+        campaign_prompt: campaignPrompt ?? "",
+      });
+      const byEmail: Record<string, SendTimeSuggestion> = {};
+      for (const suggestion of optimization.suggestions ?? []) {
+        byEmail[suggestion.email_id] = suggestion;
+      }
+      setSendTimeByEmail(byEmail);
+      setSendTimeReasoning(optimization.global_reasoning || null);
+      if (campaignId) {
+        updateCampaign(campaignId, {
+          sendTimePlan: {
+            suggestions: optimization.suggestions ?? [],
+            globalReasoning: optimization.global_reasoning || "",
+          },
+        });
+      }
+    } catch {
+      setSendTimeByEmail({});
+      setSendTimeReasoning(null);
+    } finally {
+      setIsOptimizingSendTime(false);
+      setShowConfigDialog(true);
+    }
+  };
+
   const handleSend = async (config: {
     fromEmail: string;
     replyTo: string;
     plainTexts: Record<string, string>;
     subjects: Record<string, string>;
   }) => {
+    setComplianceBlockingIssues([]);
+    setComplianceSummary(null);
+    setPerformanceCopilot(null);
+    setOrchestration(null);
+    setStartedExperiments([]);
+    setOutcomesSaved(false);
     if (!campaignGuardrailsPassed) {
       toast({
         title: "Guardrails failed",
@@ -213,13 +451,123 @@ export default function SendPage() {
       });
       return;
     }
+    const contactsByEmail = parseContactsCsvMap(rawContactsCsv);
+    const subjectRecommendationMap = new Map(
+      (campaignRecord?.aiReport?.subject_recommendations ?? []).map((item) => [item.email_id, item])
+    );
+
+    const predictedByEmail = new Map<string, { subject: string; cta: string }>();
+    const subjectOptionsByEmail = new Map<string, string[]>();
+    await Promise.all(
+      generatedEmails.map(async (email) => {
+        const recommendation = subjectRecommendationMap.get(email.id);
+        const subjectOptions = Array.from(
+          new Set(
+            [
+              config.subjects[email.id]?.trim(),
+              recommendation?.recommended,
+              ...(recommendation?.alternatives ?? []),
+              email.subject,
+            ].filter((v): v is string => Boolean(v && v.trim()))
+          )
+        );
+        if (!subjectOptions.length) return;
+        subjectOptionsByEmail.set(email.id, subjectOptions);
+        const ctaOptions = extractCtaCandidates(email.htmlContent);
+        try {
+          const predicted = await predictVariants({
+            subject_options: subjectOptions,
+            cta_options: ctaOptions,
+            audience: email.summary.targetGroup,
+            offer: campaignPrompt ?? "",
+            objective: "Maximize opens and clicks while preserving trust.",
+          });
+          predictedByEmail.set(email.id, {
+            subject: predicted.best_subject || subjectOptions[0],
+            cta: predicted.best_cta || "",
+          });
+        } catch {
+          predictedByEmail.set(email.id, { subject: subjectOptions[0], cta: ctaOptions[0] ?? "" });
+        }
+      })
+    );
+
+    if (generatedEmails.length > 0) {
+      try {
+        const orchestrationResponse = await orchestrateGrowthLoop({
+          campaign_name: campaignRecord?.name ?? "Campaign",
+          prompt: campaignPrompt ?? "",
+          audience: generatedEmails[0]?.summary.targetGroup ?? "",
+          objective: "Maximize opens, clicks, and downstream conversion quality.",
+          offer: campaignPrompt ?? "",
+          contacts_csv: rawContactsCsv ?? "",
+          emails: generatedEmails.map((email) => ({
+            id: email.id,
+            subject: predictedByEmail.get(email.id)?.subject ?? email.subject,
+            target_group: email.summary.targetGroup,
+            html_content: email.htmlContent,
+            recipient_count: emailAssignments[email.id]?.length ?? 0,
+          })),
+          banned_phrases: brand.bannedPhrases,
+          required_phrases: brand.requiredPhrases,
+          legal_footer: brand.legalFooter,
+        });
+        setOrchestration(orchestrationResponse);
+      } catch {
+        setOrchestration(null);
+      }
+    }
+
+    const preflightEmails = generatedEmails
+      .filter((email) => (emailAssignments[email.id]?.length ?? 0) > 0)
+      .map((email) => ({
+        id: email.id,
+        subject: predictedByEmail.get(email.id)?.subject || config.subjects[email.id]?.trim() || email.subject,
+        html_content: email.htmlContent,
+      }));
+
+    const compliance = await runComplianceAssistant({
+      emails: preflightEmails,
+      banned_phrases: brand.bannedPhrases,
+      required_phrases: brand.requiredPhrases,
+      legal_footer: brand.legalFooter,
+    });
+    setComplianceSummary(compliance.summary);
+    const blocking = compliance.emails.flatMap((item) =>
+      item.risk_flags.map((flag) => `Email ${item.id}: ${flag}`)
+    );
+    setComplianceBlockingIssues(blocking.slice(0, 4));
+    if (!compliance.passed) {
+      toast({
+        title: "Compliance assistant blocked send",
+        description: blocking[0] ?? compliance.summary,
+        variant: "destructive",
+      });
+      return;
+    }
+
     const tasks: CampaignSendTask[] = [];
     for (const email of generatedEmails) {
       const recipients = emailAssignments[email.id] ?? [];
       if (recipients.length === 0 || !email.htmlContent) continue;
-      const subject = config.subjects[email.id]?.trim() || email.subject;
+      const subject =
+        predictedByEmail.get(email.id)?.subject ||
+        config.subjects[email.id]?.trim() ||
+        email.subject;
+
       for (const recipient of recipients) {
-        tasks.push({ email, recipient, subject });
+        const profile = contactsByEmail.get(recipient.trim().toLowerCase());
+        const ctaAdjustedHtml = applyBestCta(
+          email.htmlContent,
+          predictedByEmail.get(email.id)?.cta ?? ""
+        );
+        const personalizedHtml = personalizeTemplate(ctaAdjustedHtml, profile);
+        tasks.push({
+          email,
+          recipient,
+          subject,
+          personalized_html: personalizedHtml,
+        });
       }
     }
 
@@ -244,6 +592,32 @@ export default function SendPage() {
       setSent(true);
       setShowConfigDialog(false);
       if (campaignId) updateCampaign(campaignId, { status: "sent" });
+
+      const copilot = await getPerformanceCopilot({
+        campaign_name: campaignRecord?.name ?? "Campaign",
+        prompt: campaignPrompt ?? "",
+        sent_count: sent,
+        failed_count: failed.length,
+        notes: compliance.summary,
+      });
+      setPerformanceCopilot(copilot);
+
+      const experiments: Array<{ emailId: string; experimentId: string }> = [];
+      for (const email of generatedEmails) {
+        const options = subjectOptionsByEmail.get(email.id) ?? [];
+        if (options.length < 2) continue;
+        try {
+          const exp = await startExperiment({
+            experiment_name: `${campaignRecord?.name ?? "Campaign"}-${email.id}-subject`,
+            metric: "click_rate",
+            variants: options.slice(0, 3),
+          });
+          experiments.push({ emailId: email.id, experimentId: exp.experiment_id });
+        } catch {
+          // Best-effort experiment tracking should not block send flow.
+        }
+      }
+      setStartedExperiments(experiments);
 
       if (failed.length > 0) {
         toast({
@@ -271,6 +645,59 @@ export default function SendPage() {
     }
   };
 
+  const handleSaveObservedOutcomes = async () => {
+    const parsePct = (value: string): number | undefined => {
+      const trimmed = value.trim();
+      if (!trimmed) return undefined;
+      const n = Number(trimmed);
+      if (!Number.isFinite(n) || n < 0 || n > 100) return undefined;
+      return n / 100;
+    };
+    const openRate = parsePct(observedOpenRate);
+    const clickRate = parsePct(observedClickRate);
+    const conversionRate = parsePct(observedConversionRate);
+    if (openRate === undefined && clickRate === undefined && conversionRate === undefined) {
+      toast({
+        title: "Add at least one metric",
+        description: "Enter observed open/click/conversion rate percentages before saving outcomes.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setSavingOutcomes(true);
+    try {
+      const saveOps = generatedEmails.map((email) =>
+        recordOutcome({
+          campaign_name: campaignRecord?.name ?? "Campaign",
+          prompt: campaignPrompt ?? "",
+          audience: email.summary.targetGroup,
+          subject: email.subject,
+          cta: "",
+          open_rate: openRate,
+          click_rate: clickRate,
+          conversion_rate: conversionRate,
+          language: "English",
+          segment: selectedSegments[email.id]?.join(", ") ?? "",
+          notes: "Observed rates entered by user after send.",
+        })
+      );
+      await Promise.all(saveOps);
+      setOutcomesSaved(true);
+      toast({
+        title: "Outcomes saved",
+        description: "Learning memory updated using observed campaign metrics.",
+      });
+    } catch (err) {
+      toast({
+        title: "Could not save outcomes",
+        description: getUserErrorMessage(err, "Please retry saving observed metrics."),
+        variant: "destructive",
+      });
+    } finally {
+      setSavingOutcomes(false);
+    }
+  };
+
   if (sent) {
     return (
       <div className="flex flex-col items-center justify-center py-24 space-y-6">
@@ -294,6 +721,100 @@ export default function SendPage() {
             {totalRecipients} emails have been queued for delivery.
           </p>
         </motion.div>
+        {complianceSummary && (
+          <div className="w-full max-w-2xl rounded-lg border border-border bg-card p-4">
+            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <ShieldAlert className="h-4 w-4 text-primary" />
+              Compliance Assistant v1
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">{complianceSummary}</p>
+            {complianceBlockingIssues.length > 0 && (
+              <p className="mt-1 text-xs text-destructive">{complianceBlockingIssues[0]}</p>
+            )}
+          </div>
+        )}
+        {performanceCopilot && (
+          <div className="w-full max-w-2xl rounded-lg border border-border bg-card p-4 space-y-2">
+            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <TrendingUp className="h-4 w-4 text-primary" />
+              Campaign Performance Copilot
+            </div>
+            <p className="text-xs text-muted-foreground">{performanceCopilot.summary}</p>
+            <ul className="text-xs text-foreground space-y-1 list-disc pl-4">
+              {performanceCopilot.next_actions.slice(0, 3).map((action) => (
+                <li key={action}>{action}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {orchestration && (
+          <div className="w-full max-w-2xl rounded-lg border border-border bg-card p-4 space-y-2">
+            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <Sparkles className="h-4 w-4 text-primary" />
+              Cross-Agent Orchestration
+            </div>
+            <p className="text-xs text-muted-foreground">{orchestration.compliance_summary}</p>
+            <p className="text-xs text-foreground">
+              Best subject: <span className="font-medium">{orchestration.best_subject || "N/A"}</span> | Best CTA:{" "}
+              <span className="font-medium">{orchestration.best_cta || "N/A"}</span>
+            </p>
+            <ul className="text-xs text-foreground space-y-1 list-disc pl-4">
+              {orchestration.next_actions.slice(0, 3).map((action) => (
+                <li key={action}>{action}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {startedExperiments.length > 0 && (
+          <div className="w-full max-w-2xl rounded-lg border border-border bg-card p-4 space-y-2">
+            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <TrendingUp className="h-4 w-4 text-primary" />
+              Experimentation Tracking
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Experiments were started without synthetic samples. Record real engagement events to determine winners.
+            </p>
+            <ul className="text-xs text-foreground space-y-1 list-disc pl-4">
+              {startedExperiments.map(({ emailId, experimentId }) => (
+                <li key={emailId}>
+                  {emailId}: {experimentId}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <div className="w-full max-w-2xl rounded-lg border border-border bg-card p-4 space-y-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <TrendingUp className="h-4 w-4 text-primary" />
+            Closed-Loop Outcomes
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Enter observed rates (0-100) once data is available, then save to improve memory retrieval quality.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <Input
+              inputMode="decimal"
+              placeholder="Open rate %"
+              value={observedOpenRate}
+              onChange={(e) => setObservedOpenRate(e.target.value)}
+            />
+            <Input
+              inputMode="decimal"
+              placeholder="Click rate %"
+              value={observedClickRate}
+              onChange={(e) => setObservedClickRate(e.target.value)}
+            />
+            <Input
+              inputMode="decimal"
+              placeholder="Conversion rate %"
+              value={observedConversionRate}
+              onChange={(e) => setObservedConversionRate(e.target.value)}
+            />
+          </div>
+          <Button variant="outline" onClick={handleSaveObservedOutcomes} disabled={savingOutcomes || outcomesSaved}>
+            {outcomesSaved ? "Outcomes Saved" : savingOutcomes ? "Saving..." : "Save Observed Outcomes"}
+          </Button>
+        </div>
         {campaignId ? (
           <Button variant="outline" onClick={() => { reset(); navigate("/campaigns"); }}>
             Back to Campaigns
@@ -354,8 +875,21 @@ export default function SendPage() {
         </motion.div>
       )}
 
+      {rawContactsCsv && segmentDiscoveryReasoning && discoveredSegments.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-lg border border-border bg-card px-4 py-3"
+        >
+          <p className="text-xs font-medium text-foreground">
+            Audience Segment Discovery: {discoveredSegments.length} suggested clusters
+          </p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">{segmentDiscoveryReasoning}</p>
+        </motion.div>
+      )}
+
       {/* Auto-select banner — keyword segment suggestions (no CSV) */}
-      {!rawContactsCsv && segments.length > 0 && hasSuggestions && (
+      {!rawContactsCsv && mergedSegments.length > 0 && hasSuggestions && (
         <motion.div
           initial={{ opacity: 0, y: -8 }}
           animate={{ opacity: 1, y: 0 }}
@@ -375,6 +909,17 @@ export default function SendPage() {
           >
             Apply suggestions
           </Button>
+        </motion.div>
+      )}
+
+      {complianceBlockingIssues.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3"
+        >
+          <p className="text-xs font-medium text-destructive">Pre-send compliance issues found</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">{complianceBlockingIssues[0]}</p>
         </motion.div>
       )}
 
@@ -415,7 +960,7 @@ export default function SendPage() {
 
               <CardContent className="px-5 pb-5 space-y-3">
                 <Tabs
-                  defaultValue={connected && segments.length > 0 ? "audiences" : "manual"}
+                  defaultValue={connected && mergedSegments.length > 0 ? "audiences" : "manual"}
                   className="w-full"
                 >
                   <TabsList className="w-full">
@@ -446,7 +991,7 @@ export default function SendPage() {
                           Connect HubSpot
                         </Button>
                       </div>
-                    ) : segments.length === 0 ? (
+                    ) : mergedSegments.length === 0 ? (
                       <div className="flex flex-col items-center gap-2 py-6 text-center">
                         <p className="text-xs text-muted-foreground">
                           No contact segments found in your HubSpot account.
@@ -457,7 +1002,7 @@ export default function SendPage() {
                       </div>
                     ) : (
                       <div className="space-y-2">
-                        {segments.map((seg) => {
+                        {mergedSegments.map((seg) => {
                           const isSuggested = suggestedSegments[email.id]?.has(seg.id) ?? false;
                           const isChecked = selectedSegments[email.id]?.includes(seg.id) ?? false;
                           return (
@@ -541,11 +1086,11 @@ export default function SendPage() {
               <Button
                 size="lg"
                 className="h-11 px-8 text-sm font-semibold rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
-                onClick={() => setShowConfigDialog(true)}
-                disabled={totalRecipients === 0}
+                onClick={handleOpenConfig}
+                disabled={totalRecipients === 0 || isOptimizingSendTime}
               >
                 <Settings2 className="h-4 w-4" />
-                Configure Mailing
+                {isOptimizingSendTime ? "Optimizing…" : "Configure Mailing"}
               </Button>
             </div>
           </CardContent>
@@ -558,6 +1103,8 @@ export default function SendPage() {
         emails={generatedEmails}
         emailAssignments={emailAssignments}
         defaultFromEmail={configuredFromEmail}
+        sendTimeByEmail={sendTimeByEmail}
+        sendTimeReasoning={sendTimeReasoning}
         onSend={handleSend}
         isSending={isSending}
       />

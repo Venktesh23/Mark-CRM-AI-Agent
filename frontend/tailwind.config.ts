@@ -15,8 +15,8 @@ export default {
     },
     extend: {
       fontFamily: {
-        sans: ['Nunito', 'sans-serif'],
-        display: ['Casad', 'Nunito', 'sans-serif'],
+        sans: ['Inter', 'sans-serif'],
+        display: ['Inter', 'sans-serif'],
         mono: ['Fragment Mono', 'monospace'],
       },
       colors: {

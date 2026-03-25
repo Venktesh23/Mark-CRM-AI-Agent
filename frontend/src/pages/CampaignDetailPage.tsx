@@ -21,16 +21,18 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
   useCampaignsStore,
   type CampaignStatus,
 } from "@/lib/campaigns-list-store";
 import { useCampaignStore } from "@/lib/campaign-store";
-import { editEmail } from "@/lib/api";
+import { editEmail, repurposeCampaignContent } from "@/lib/api";
 import type { GeneratedEmail } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import { getUserErrorMessage } from "@/core/errors/user-message";
+import { Input } from "@/components/ui/input";
 
 // ── Status config ──────────────────────────────────────────────────────────
 
@@ -201,6 +203,9 @@ function EmailModal({
           <DialogTitle className="text-base font-semibold">
             {email.subject}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            Campaign email preview with summary, edit actions, and approvals.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-1 overflow-hidden">
@@ -412,12 +417,14 @@ function EmailModal({
 export default function CampaignDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { campaigns } = useCampaignsStore();
+  const { campaigns, updateCampaign } = useCampaignsStore();
   const { setGeneratedEmails, reset } = useCampaignStore();
 
   const campaign = campaigns.find((c) => c.id === id);
 
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
+  const [channelsInput, setChannelsInput] = useState("social_post,sms");
+  const [isRepurposing, setIsRepurposing] = useState(false);
 
   if (!campaign) {
     return (
@@ -450,6 +457,54 @@ export default function CampaignDetailPage() {
     reset();
     setGeneratedEmails(campaign.emails);
     navigate("/send", { state: { campaignId: campaign.id } });
+  };
+
+  const handleRepurpose = async () => {
+    const channels = channelsInput
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (!channels.length) {
+      toast({
+        title: "No channels selected",
+        description: "Provide at least one channel (example: social_post,sms).",
+        variant: "destructive",
+      });
+      return;
+    }
+    setIsRepurposing(true);
+    try {
+      const response = await repurposeCampaignContent({
+        campaign_name: campaign.name,
+        objective: campaign.prompt,
+        channels,
+        emails: campaign.emails.map((email) => ({
+          id: email.id,
+          subject: email.subject,
+          html_content: email.htmlContent,
+          target_group: email.summary.targetGroup,
+        })),
+      });
+      updateCampaign(campaign.id, {
+        repurposedContent: {
+          assets: response.assets,
+          reasoning: response.reasoning,
+          updatedAt: new Date().toISOString(),
+        },
+      });
+      toast({
+        title: "Repurposed content ready",
+        description: `Generated ${response.assets.length} channel assets.`,
+      });
+    } catch (err) {
+      toast({
+        title: "Repurposing failed",
+        description: getUserErrorMessage(err, "Could not generate repurposed channel assets."),
+        variant: "destructive",
+      });
+    } finally {
+      setIsRepurposing(false);
+    }
   };
 
   return (
@@ -513,6 +568,50 @@ export default function CampaignDetailPage() {
             {" · "}Latency <span className="font-medium text-foreground">{campaign.aiReport.timings_ms?.total_ms ?? "n/a"} ms</span>
           </div>
         ) : null}
+        {campaign.sendTimePlan?.suggestions?.length ? (
+          <div className="rounded-lg border border-border bg-card px-4 py-3 text-xs text-muted-foreground">
+            <p className="text-foreground font-medium mb-1">Saved send-time plan</p>
+            <p>{campaign.sendTimePlan.globalReasoning || "Segment-aware send-time optimization saved."}</p>
+            {campaign.sendTimePlan.suggestions.slice(0, 3).map((item) => (
+              <p key={item.email_id} className="mt-1">
+                {item.email_id}: {item.local_window} ({item.timezone})
+              </p>
+            ))}
+          </div>
+        ) : null}
+        <div className="rounded-lg border border-border bg-card px-4 py-3 space-y-2">
+          <p className="text-foreground font-medium text-xs">Content Repurposing Agent</p>
+          <div className="flex gap-2">
+            <Input
+              value={channelsInput}
+              onChange={(e) => setChannelsInput(e.target.value)}
+              placeholder="social_post,sms,linkedin"
+              className="h-8 text-xs"
+            />
+            <Button size="sm" variant="outline" onClick={handleRepurpose} disabled={isRepurposing}>
+              {isRepurposing ? "Generating..." : "Generate"}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Comma-separated channels. Example: `social_post,sms,linkedin`.
+          </p>
+          {campaign.repurposedContent?.reasoning && (
+            <p className="text-xs text-muted-foreground">{campaign.repurposedContent.reasoning}</p>
+          )}
+          {campaign.repurposedContent?.assets?.length ? (
+            <div className="space-y-2">
+              {campaign.repurposedContent.assets.slice(0, 8).map((asset, idx) => (
+                <div key={`${asset.channel}-${idx}`} className="rounded border border-border p-2">
+                  <p className="text-xs font-medium text-foreground">
+                    {asset.channel}: {asset.title}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">{asset.body}</p>
+                  {asset.cta && <p className="text-xs text-foreground mt-1">CTA: {asset.cta}</p>}
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
       </motion.div>
 
       {/* Email grid */}

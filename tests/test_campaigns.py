@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.models import CampaignStatus
-from app.services.gemini_client import get_gemini_client
+from app.services.gemini_client import get_gemini_client, get_optional_gemini_client
 
 
 @pytest.fixture
@@ -334,3 +334,423 @@ class TestGenerateEndpoint:
         app.dependency_overrides[get_gemini_client] = lambda: MagicMock()
         resp = client.post("/v1/campaigns/generate", json={})
         assert resp.status_code == 422
+
+
+class TestP0Endpoints:
+    def test_compliance_assistant_checks_subject_and_body(self, client):
+        payload = {
+            "emails": [
+                {
+                    "id": "email-1",
+                    "subject": "BUY NOW!!! free money for everyone",
+                    "html_content": "<html><body>Hello friend</body></html>",
+                }
+            ],
+            "banned_phrases": ["free money"],
+            "required_phrases": ["limited time"],
+            "legal_footer": "© 2026 Example Inc. | Unsubscribe | Privacy",
+        }
+        resp = client.post("/v1/campaigns/compliance-assistant", json=payload)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["passed"] is False
+        assert len(data["emails"]) == 1
+        email = data["emails"][0]
+        assert any("Banned phrase" in flag for flag in email["risk_flags"])
+        assert any("SUBJECT SPAM RISK" in flag for flag in email["risk_flags"])
+        assert any("Required phrase" in issue for issue in email["issues"])
+
+    def test_performance_copilot_fallback_uses_sent_count(self, client):
+        mock_client = MagicMock()
+        mock_client.generate_text.side_effect = RuntimeError("upstream error")
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+        payload = {
+            "campaign_name": "Spring Promo",
+            "prompt": "Send spring offer",
+            "sent_count": 10,
+            "failed_count": 4,
+        }
+        resp = client.post("/v1/campaigns/performance-copilot", json=payload)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "Delivered 10 emails with 4 failures" in data["summary"]
+
+
+class TestP1Endpoints:
+    def test_smart_brief_returns_structured_brief(self, client):
+        mock_client = MagicMock()
+        mock_client.generate_text.return_value = {
+            "parsed": {
+                "brief": {
+                    "campaign_name": "Spring Promo",
+                    "objective": "Boost seasonal conversions",
+                    "target_audience": "Members in Sweden",
+                    "offer": "20% discount",
+                    "primary_kpi": "conversion_rate",
+                    "geo_scope": "Sweden",
+                    "language": "English",
+                    "tone": "Friendly and practical",
+                    "compliance_notes": "Include unsubscribe footer",
+                    "send_window": "Next week",
+                    "number_of_emails": 3,
+                    "key_points": ["Clear value", "Urgency"],
+                    "assumptions": ["ASSUMPTION: Users prefer morning sends"],
+                },
+                "questions": ["Should VIP members get a separate variant?"],
+            }
+        }
+        app.dependency_overrides[get_optional_gemini_client] = lambda: mock_client
+        resp = client.post("/v1/campaigns/smart-brief", json={"prompt": "Create spring campaign"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["brief"]["campaign_name"] == "Spring Promo"
+        assert data["brief"]["number_of_emails"] == 3
+        assert data["questions"]
+
+    def test_discover_segments_returns_seeded_segments(self, client):
+        mock_client = MagicMock()
+        mock_client.generate_text.return_value = {
+            "parsed": {
+                "segments": [
+                    {"name": "Loyal Nordics", "description": "Long-term members in Nordics", "recommended_for": "Retention"},
+                    {"name": "Stockholm Active", "description": "Active contacts in Stockholm", "recommended_for": "Local events"},
+                ],
+                "reasoning": "Grouped by membership and location signals.",
+            }
+        }
+        app.dependency_overrides[get_optional_gemini_client] = lambda: mock_client
+        csv_data = (
+            "firstname,lastname,email,age,membership_level,membership_startdate,city,country\n"
+            "A,One,a@example.com,31,Gold,2021-01-01,Stockholm,Sweden\n"
+            "B,Two,b@example.com,28,Gold,2022-02-01,Stockholm,Sweden\n"
+            "C,Three,c@example.com,44,Silver,2020-03-03,Gothenburg,Sweden\n"
+        )
+        resp = client.post(
+            "/v1/campaigns/discover-segments",
+            json={"contacts_csv": csv_data, "max_segments": 6, "campaign_prompt": "Retention push"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["segments"]
+        assert data["segments"][0]["id"] == "cluster_all"
+        assert any(seg["emails"] for seg in data["segments"])
+
+    def test_optimize_send_times_returns_suggestions(self, client):
+        mock_client = MagicMock()
+        mock_client.generate_text.return_value = {
+            "parsed": {
+                "adjustments": [
+                    {"email_id": "email-1", "recommended_hour_local": 11, "rationale": "Best for professionals."}
+                ],
+                "global_reasoning": "Balanced by timezone and segment behavior.",
+            }
+        }
+        app.dependency_overrides[get_optional_gemini_client] = lambda: mock_client
+        csv_data = (
+            "firstname,lastname,email,age,membership_level,membership_startdate,city,country\n"
+            "A,One,a@example.com,31,Gold,2021-01-01,Stockholm,Sweden\n"
+        )
+        payload = {
+            "contacts_csv": csv_data,
+            "campaign_prompt": "B2B upsell",
+            "emails": [{"email_id": "email-1", "subject": "Offer", "target_group": "Working professionals", "recipient_count": 25}],
+        }
+        resp = client.post("/v1/campaigns/optimize-send-times", json=payload)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["suggestions"]
+        assert data["suggestions"][0]["email_id"] == "email-1"
+        assert 0 <= data["suggestions"][0]["recommended_hour_local"] <= 23
+
+    def test_p1_endpoints_work_when_gemini_unavailable(self, client):
+        app.dependency_overrides[get_optional_gemini_client] = lambda: None
+        csv_data = (
+            "firstname,lastname,email,age,membership_level,membership_startdate,city,country\n"
+            "A,One,a@example.com,31,Gold,2021-01-01,Stockholm,Sweden\n"
+            "B,Two,b@example.com,28,Gold,2022-02-01,Stockholm,Sweden\n"
+        )
+
+        brief_resp = client.post("/v1/campaigns/smart-brief", json={"prompt": "Create campaign"})
+        assert brief_resp.status_code == 200
+        assert brief_resp.json()["brief"]["campaign_name"]
+
+        seg_resp = client.post(
+            "/v1/campaigns/discover-segments",
+            json={"contacts_csv": csv_data, "max_segments": 5, "campaign_prompt": "Retention"},
+        )
+        assert seg_resp.status_code == 200
+        assert seg_resp.json()["segments"]
+
+        send_time_resp = client.post(
+            "/v1/campaigns/optimize-send-times",
+            json={
+                "contacts_csv": csv_data,
+                "emails": [{"email_id": "email-1", "target_group": "professionals", "subject": "Offer", "recipient_count": 2}],
+            },
+        )
+        assert send_time_resp.status_code == 200
+        assert send_time_resp.json()["suggestions"]
+
+
+class TestP2Endpoints:
+    def test_voice_train_returns_profile(self, client):
+        mock_client = MagicMock()
+        mock_client.generate_text.return_value = {
+            "parsed": {
+                "profile": {
+                    "style_summary": "Clear, practical, customer-first tone.",
+                    "do_list": ["Lead with value", "Use concrete examples"],
+                    "dont_list": ["Avoid hype"],
+                    "vocabulary": ["clarity", "value", "members"],
+                    "sample_lines": ["Members save more with clear next steps."],
+                    "confidence": 84,
+                },
+                "reasoning": "Trained from approved campaign snippets.",
+            }
+        }
+        app.dependency_overrides[get_optional_gemini_client] = lambda: mock_client
+        resp = client.post(
+            "/v1/campaigns/voice-train",
+            json={
+                "brand_name": "Acme",
+                "current_voice": "Professional and friendly",
+                "campaign_examples": ["Spring promo for loyal members"],
+                "approved_html_samples": ["<html><body>Save now</body></html>"],
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["profile"]["style_summary"]
+        assert 0 <= data["profile"]["confidence"] <= 100
+
+    def test_localize_campaign_returns_email_variants(self, client):
+        mock_client = MagicMock()
+        mock_client.generate_text.return_value = {
+            "parsed": {
+                "emails": [
+                    {
+                        "id": "email-1",
+                        "subject": "Oferta de primavera",
+                        "html_content": "<html><body>Oferta localizada</body></html>",
+                        "notes": "Localized to ES",
+                    }
+                ],
+                "reasoning": "Localized with regional context.",
+            }
+        }
+        app.dependency_overrides[get_optional_gemini_client] = lambda: mock_client
+        resp = client.post(
+            "/v1/campaigns/localize-campaign",
+            json={
+                "language": "Spanish",
+                "region": "Spain",
+                "brand_voice": "Friendly",
+                "emails": [
+                    {
+                        "id": "email-1",
+                        "subject": "Spring Offer",
+                        "html_content": "<html><body>Spring offer</body></html>",
+                        "target_group": "Members",
+                    }
+                ],
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["emails"]
+        assert data["emails"][0]["id"] == "email-1"
+        assert data["emails"][0]["subject"]
+
+    def test_repurpose_content_returns_assets(self, client):
+        mock_client = MagicMock()
+        mock_client.generate_text.return_value = {
+            "parsed": {
+                "assets": [
+                    {
+                        "channel": "social_post",
+                        "title": "Launch Post",
+                        "body": "Short social teaser for the campaign.",
+                        "cta": "Learn more",
+                    },
+                    {
+                        "channel": "sms",
+                        "title": "SMS Variant",
+                        "body": "Limited-time offer for members.",
+                        "cta": "Shop now",
+                    },
+                ],
+                "reasoning": "Repurposed for short-form channels.",
+            }
+        }
+        app.dependency_overrides[get_optional_gemini_client] = lambda: mock_client
+        resp = client.post(
+            "/v1/campaigns/repurpose-content",
+            json={
+                "campaign_name": "Spring Campaign",
+                "objective": "Drive conversions",
+                "channels": ["social_post", "sms"],
+                "emails": [
+                    {
+                        "id": "email-1",
+                        "subject": "Spring Offer",
+                        "html_content": "<html><body>Offer details</body></html>",
+                        "target_group": "Members",
+                    }
+                ],
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["assets"]) >= 2
+        assert all(asset["channel"] for asset in data["assets"])
+
+    def test_p2_endpoints_work_when_gemini_unavailable(self, client):
+        app.dependency_overrides[get_optional_gemini_client] = lambda: None
+
+        voice_resp = client.post(
+            "/v1/campaigns/voice-train",
+            json={"brand_name": "Acme", "current_voice": "Professional", "campaign_examples": [], "approved_html_samples": []},
+        )
+        assert voice_resp.status_code == 200
+        assert voice_resp.json()["profile"]["style_summary"]
+
+        localize_resp = client.post(
+            "/v1/campaigns/localize-campaign",
+            json={
+                "language": "French",
+                "emails": [{"id": "email-1", "subject": "Offer", "html_content": "<html><body>Offer</body></html>"}],
+            },
+        )
+        assert localize_resp.status_code == 200
+        assert localize_resp.json()["emails"][0]["subject"]
+
+        repurpose_resp = client.post(
+            "/v1/campaigns/repurpose-content",
+            json={
+                "campaign_name": "Any Campaign",
+                "objective": "Engagement",
+                "channels": ["social_post"],
+                "emails": [{"id": "email-1", "subject": "Offer", "html_content": "<html><body>Offer</body></html>"}],
+            },
+        )
+        assert repurpose_resp.status_code == 200
+        assert repurpose_resp.json()["assets"]
+
+
+class TestGrowthUpgrades:
+    def test_record_and_retrieve_memory(self, client):
+        record_resp = client.post(
+            "/v1/campaigns/record-outcome",
+            json={
+                "campaign_name": "Spring",
+                "prompt": "Spring retention",
+                "audience": "Loyal members",
+                "subject": "Spring savings for members",
+                "cta": "Claim offer",
+                "open_rate": 0.42,
+                "click_rate": 0.15,
+                "conversion_rate": 0.06,
+                "segment": "Gold",
+            },
+        )
+        assert record_resp.status_code == 200
+        assert record_resp.json()["stored"] is True
+
+        memory_resp = client.post(
+            "/v1/campaigns/retrieve-memory",
+            json={"prompt": "member retention offer", "audience": "members", "objective": "retention", "limit": 3},
+        )
+        assert memory_resp.status_code == 200
+        data = memory_resp.json()
+        assert data["snippets"]
+        assert "score=" in data["snippets"][0]["snippet"]
+
+    def test_experiment_lifecycle_and_winner(self, client):
+        start_resp = client.post(
+            "/v1/campaigns/experiments/start",
+            json={
+                "experiment_name": "Subject Test",
+                "metric": "click_rate",
+                "variants": ["A subject", "B subject"],
+            },
+        )
+        assert start_resp.status_code == 200
+        experiment_id = start_resp.json()["experiment_id"]
+
+        rec_a = client.post(
+            "/v1/campaigns/experiments/record",
+            json={
+                "experiment_id": experiment_id,
+                "variant": "A subject",
+                "impressions": 100,
+                "clicks": 18,
+                "conversions": 7,
+            },
+        )
+        assert rec_a.status_code == 200
+
+        rec_b = client.post(
+            "/v1/campaigns/experiments/record",
+            json={
+                "experiment_id": experiment_id,
+                "variant": "B subject",
+                "impressions": 100,
+                "clicks": 9,
+                "conversions": 3,
+            },
+        )
+        assert rec_b.status_code == 200
+        assert rec_b.json()["winner"] == "A subject"
+        assert rec_b.json()["completed"] is True
+
+    def test_orchestrate_growth_loop_returns_compound_insights(self, client):
+        client.post(
+            "/v1/campaigns/record-outcome",
+            json={
+                "campaign_name": "Baseline",
+                "prompt": "Loyal members campaign",
+                "audience": "Loyal members",
+                "subject": "Welcome back members",
+                "cta": "Explore now",
+                "click_rate": 0.12,
+            },
+        )
+        resp = client.post(
+            "/v1/campaigns/orchestrate-growth-loop",
+            json={
+                "campaign_name": "Growth Loop",
+                "prompt": "Retention + upsell",
+                "audience": "Loyal members",
+                "objective": "Increase conversion",
+                "offer": "20% off",
+                "contacts_csv": "firstname,lastname,email,city,country\nA,One,a@example.com,Stockholm,Sweden\n",
+                "emails": [
+                    {
+                        "id": "email-1",
+                        "subject": "20% off for loyal members",
+                        "target_group": "Loyal members",
+                        "html_content": "<html><body><a href='https://example.com'>Claim now</a></body></html>",
+                        "recipient_count": 30,
+                    }
+                ],
+                "banned_phrases": [],
+                "required_phrases": [],
+                "legal_footer": "Unsubscribe",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "next_actions" in data
+        assert data["next_actions"]
+        assert "memory_snippets" in data
+
+    def test_agent_metrics_snapshot(self, client):
+        client.post(
+            "/v1/campaigns/record-outcome",
+            json={"campaign_name": "x", "prompt": "y", "audience": "z", "subject": "subj", "cta": "cta"},
+        )
+        metrics_resp = client.get("/v1/campaigns/agent-metrics")
+        assert metrics_resp.status_code == 200
+        payload = metrics_resp.json()
+        assert "metrics" in payload
+        assert "total_calls" in payload

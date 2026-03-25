@@ -256,3 +256,12 @@ def get_gemini_client() -> GeminiClient:
     if _client_instance is None:
         _client_instance = GeminiClient()
     return _client_instance
+
+
+def get_optional_gemini_client() -> Optional[GeminiClient]:
+    """Best-effort Gemini dependency; returns None if unavailable."""
+    try:
+        return get_gemini_client()
+    except Exception as exc:
+        logger.warning("Gemini unavailable, continuing with fallback logic: %s", exc)
+        return None

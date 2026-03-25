@@ -3,10 +3,17 @@ import { motion } from "framer-motion";
 import { Sparkles, Loader2, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { useCampaignStore } from "@/lib/campaign-store";
 import { useCampaignsStore } from "@/lib/campaigns-list-store";
-import { generateCampaign, type ClarificationQuestion } from "@/lib/api";
+import {
+  generateCampaign,
+  generateSmartBrief,
+  retrieveMemory,
+  type ClarificationQuestion,
+  type SmartBrief,
+} from "@/lib/api";
 import { useBrandStore } from "@/lib/brand-store";
 import { useNavigate } from "react-router-dom";
 import { getUserErrorMessage } from "@/core/errors/user-message";
@@ -129,6 +136,9 @@ export default function CreatePage() {
 
   const [clarificationQuestions, setClarificationQuestions] = useState<ClarificationQuestion[]>([]);
   const [clarificationAnswers, setClarificationAnswers] = useState<Record<string, string>>({});
+  const [smartBrief, setSmartBrief] = useState<SmartBrief | null>(null);
+  const [briefQuestions, setBriefQuestions] = useState<string[]>([]);
+  const [isGeneratingBrief, setIsGeneratingBrief] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const buildEnrichedPrompt = () => {
@@ -140,8 +150,51 @@ export default function CreatePage() {
       : prompt;
   };
 
+  const buildPromptFromBrief = (brief: SmartBrief): string => {
+    const keyPoints = brief.key_points.length
+      ? `Key points:\n- ${brief.key_points.join("\n- ")}`
+      : "";
+    const assumptions = brief.assumptions.length
+      ? `Assumptions:\n- ${brief.assumptions.join("\n- ")}`
+      : "";
+    return [
+      prompt.trim(),
+      `Campaign Name: ${brief.campaign_name}`,
+      `Objective: ${brief.objective}`,
+      `Primary KPI: ${brief.primary_kpi}`,
+      `Target Audience: ${brief.target_audience}`,
+      `Offer: ${brief.offer}`,
+      `Geo Scope: ${brief.geo_scope}`,
+      `Language: ${brief.language}`,
+      `Tone: ${brief.tone}`,
+      `Compliance Notes: ${brief.compliance_notes}`,
+      `Send Window: ${brief.send_window}`,
+      `Number of Emails: ${brief.number_of_emails}`,
+      keyPoints,
+      assumptions,
+    ]
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join("\n\n");
+  };
+
+  const handleGenerateBrief = async () => {
+    if (!prompt.trim()) return;
+    setIsGeneratingBrief(true);
+    setError(null);
+    try {
+      const response = await generateSmartBrief(prompt);
+      setSmartBrief(response.brief);
+      setBriefQuestions(response.questions ?? []);
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Could not generate smart brief. Please retry."));
+    } finally {
+      setIsGeneratingBrief(false);
+    }
+  };
+
   const handleGenerate = async (enrichedPrompt?: string, forceProceed = false) => {
-    const activePrompt = enrichedPrompt ?? prompt;
+    const activePrompt = enrichedPrompt ?? (smartBrief ? buildPromptFromBrief(smartBrief) : prompt);
     if (!activePrompt.trim()) return;
     setError(null);
     setGenerationReport(null);
@@ -151,6 +204,18 @@ export default function CreatePage() {
       .filter((c) => c.status === "approved" || c.status === "sent")
       .slice(0, 5)
       .map((c) => `${c.name}: ${c.prompt}`);
+    let retrievedMemory: string[] = [];
+    try {
+      const memory = await retrieveMemory({
+        prompt: activePrompt,
+        audience: smartBrief?.target_audience ?? "",
+        objective: smartBrief?.objective ?? "",
+        limit: 5,
+      });
+      retrievedMemory = memory.snippets.map((item) => item.snippet);
+    } catch {
+      retrievedMemory = [];
+    }
 
     try {
       const response = await generateCampaign({
@@ -165,7 +230,7 @@ export default function CreatePage() {
           legalFooter: brand.legalFooter,
           designTokens: brand.designTokens,
         } : undefined,
-        campaign_memory: campaignMemory,
+        campaign_memory: [...campaignMemory, ...retrievedMemory].slice(0, 10),
       });
       console.log("Campaign response:", response);
 
@@ -196,6 +261,9 @@ export default function CreatePage() {
     setClarificationQuestions([]);
     handleGenerate(enriched, true);
   };
+
+  const updateBrief = (updates: Partial<SmartBrief>) =>
+    setSmartBrief((prev) => (prev ? { ...prev, ...updates } : prev));
 
   // ── Clarification screen ──────────────────────────────────────────────────
   if (clarificationQuestions.length > 0) {
@@ -320,9 +388,98 @@ export default function CreatePage() {
               </p>
               <span className="text-xs text-muted-foreground font-mono-display">{prompt.length}</span>
             </div>
+            <div className="flex justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleGenerateBrief}
+                disabled={!prompt.trim() || isGeneratingBrief || isGenerating}
+              >
+                {isGeneratingBrief ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Generating Brief…
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-3.5 w-3.5" />
+                    Smart Brief
+                  </>
+                )}
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </motion.div>
+
+      {smartBrief && (
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+        >
+          <Card className="border border-border">
+            <CardContent className="p-5 space-y-4">
+              <p className="text-sm font-semibold text-foreground">Structured Brief Editor</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input value={smartBrief.campaign_name} onChange={(e) => updateBrief({ campaign_name: e.target.value })} placeholder="Campaign Name" />
+                <Input value={smartBrief.primary_kpi} onChange={(e) => updateBrief({ primary_kpi: e.target.value })} placeholder="Primary KPI" />
+                <Input value={smartBrief.target_audience} onChange={(e) => updateBrief({ target_audience: e.target.value })} placeholder="Target Audience" />
+                <Input value={smartBrief.offer} onChange={(e) => updateBrief({ offer: e.target.value })} placeholder="Offer" />
+                <Input value={smartBrief.geo_scope} onChange={(e) => updateBrief({ geo_scope: e.target.value })} placeholder="Geo Scope" />
+                <Input value={smartBrief.language} onChange={(e) => updateBrief({ language: e.target.value })} placeholder="Language" />
+                <Input value={smartBrief.send_window} onChange={(e) => updateBrief({ send_window: e.target.value })} placeholder="Send Window" />
+                <Input
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={smartBrief.number_of_emails}
+                  onChange={(e) =>
+                    updateBrief({ number_of_emails: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })
+                  }
+                  placeholder="Number of Emails"
+                />
+              </div>
+              <Textarea
+                value={smartBrief.objective}
+                onChange={(e) => updateBrief({ objective: e.target.value })}
+                placeholder="Objective"
+                className="min-h-[70px] text-sm"
+              />
+              <Textarea
+                value={smartBrief.tone}
+                onChange={(e) => updateBrief({ tone: e.target.value })}
+                placeholder="Tone"
+                className="min-h-[60px] text-sm"
+              />
+              <Textarea
+                value={smartBrief.compliance_notes}
+                onChange={(e) => updateBrief({ compliance_notes: e.target.value })}
+                placeholder="Compliance Notes"
+                className="min-h-[60px] text-sm"
+              />
+              <Textarea
+                value={smartBrief.key_points.join("\n")}
+                onChange={(e) =>
+                  updateBrief({
+                    key_points: e.target.value.split("\n").map((line) => line.trim()).filter(Boolean),
+                  })
+                }
+                placeholder="Key points (one per line)"
+                className="min-h-[80px] text-sm"
+              />
+              {briefQuestions.length > 0 && (
+                <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
+                  <p className="text-xs font-medium text-foreground mb-1">Follow-up Questions</p>
+                  {briefQuestions.map((q) => (
+                    <p key={q} className="text-xs text-muted-foreground">- {q}</p>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
 
       {/* Generate Button */}
       <motion.div
@@ -335,7 +492,7 @@ export default function CreatePage() {
           size="lg"
           className="h-11 px-8 text-sm font-semibold rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
           onClick={() => handleGenerate()}
-          disabled={!prompt.trim() || isGenerating}
+          disabled={(!prompt.trim() && !smartBrief) || isGenerating}
         >
           {isGenerating ? (
             <>

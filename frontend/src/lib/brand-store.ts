@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { CrmData } from "./crm-parser";
 import { parseCrmData } from "./crm-parser";
+import type { VoiceProfile } from "./api";
 
 export interface BrandDesignTokens {
   autoDesign: boolean;
@@ -44,8 +45,10 @@ export const DEFAULT_BRAND: BrandConfig = {
 interface BrandState {
   brand: BrandConfig;
   importedFromCrm: boolean;
+  voiceProfile: VoiceProfile | null;
   updateBrand: (updates: Partial<BrandConfig>) => void;
   updateDesignTokens: (updates: Partial<BrandDesignTokens>) => void;
+  setVoiceProfile: (profile: VoiceProfile | null) => void;
   populateFromCrm: (data: CrmData) => void;
   reset: () => void;
 }
@@ -55,6 +58,7 @@ export const useBrandStore = create<BrandState>()(
     (set) => ({
       brand: DEFAULT_BRAND,
       importedFromCrm: false,
+      voiceProfile: null,
       updateBrand: (updates) =>
         set((state) => ({ brand: { ...state.brand, ...updates } })),
       updateDesignTokens: (updates) =>
@@ -64,6 +68,7 @@ export const useBrandStore = create<BrandState>()(
             designTokens: { ...state.brand.designTokens, ...updates },
           },
         })),
+      setVoiceProfile: (profile) => set({ voiceProfile: profile }),
       populateFromCrm: (data: CrmData) => {
         const partial = parseCrmData(data);
         set((state) => ({
@@ -78,7 +83,7 @@ export const useBrandStore = create<BrandState>()(
           },
         }));
       },
-      reset: () => set({ brand: DEFAULT_BRAND, importedFromCrm: false }),
+      reset: () => set({ brand: DEFAULT_BRAND, importedFromCrm: false, voiceProfile: null }),
     }),
     { name: "mark-brand" }
   )

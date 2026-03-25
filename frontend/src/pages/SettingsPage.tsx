@@ -12,6 +12,7 @@ import { DEMO_CRM_DATA } from "@/features/demo/demo-data";
 import { useHubSpotStore } from "@/lib/hubspot-store";
 import { useBrandStore } from "@/lib/brand-store";
 import { useHubSpotContactsStore } from "@/lib/hubspot-contacts-store";
+import { getAgentMetrics, type AgentMetricItem } from "@/lib/api";
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -25,6 +26,8 @@ export default function SettingsPage() {
   const setLastSyncedAt = useHubSpotStore((s) => s.setLastSyncedAt);
   const populateFromCrm = useBrandStore((s) => s.populateFromCrm);
   const populateSegments = useHubSpotContactsStore((s) => s.populateSegments);
+  const [agentMetrics, setAgentMetrics] = useState<AgentMetricItem[]>([]);
+  const [loadingMetrics, setLoadingMetrics] = useState(false);
 
   const timeoutValue = useMemo(() => Number(timeoutMinutes), [timeoutMinutes]);
 
@@ -73,6 +76,23 @@ export default function SettingsPage() {
       description: "All local data was cleared. You can onboard again.",
     });
     navigate("/signup", { replace: true });
+  };
+
+  const refreshAgentMetrics = async () => {
+    setLoadingMetrics(true);
+    try {
+      const data = await getAgentMetrics();
+      setAgentMetrics(data.metrics ?? []);
+    } catch {
+      setAgentMetrics([]);
+      toast({
+        title: "Metrics unavailable",
+        description: "Could not load agent observability metrics right now.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingMetrics(false);
+    }
   };
 
   return (
@@ -138,6 +158,32 @@ export default function SettingsPage() {
           <Button variant="destructive" onClick={resetData}>
             Reset app data
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Agent Observability</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Inspect runtime calls, fallback rate, and average latency for your AI agents.
+          </p>
+          <Button variant="outline" onClick={refreshAgentMetrics} disabled={loadingMetrics}>
+            {loadingMetrics ? "Refreshing…" : "Refresh metrics"}
+          </Button>
+          {agentMetrics.length > 0 && (
+            <div className="rounded-lg border border-border divide-y divide-border">
+              {agentMetrics.slice(0, 8).map((item) => (
+                <div key={item.agent} className="px-3 py-2 text-xs flex items-center justify-between gap-3">
+                  <span className="font-medium text-foreground">{item.agent}</span>
+                  <span className="text-muted-foreground">
+                    calls {item.calls} | success {item.success} | fallback {item.fallback} | avg {item.avg_latency_ms}ms
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

@@ -19,11 +19,18 @@ function ProtectedApp() {
   const cloudInitialized = useCloudAuthStore((s) => s.initialized);
   const cloudUser = useCloudAuthStore((s) => s.user);
   useCloudCampaigns();
+  const e2eBypass =
+    import.meta.env.VITE_E2E_BYPASS_AUTH === "true" &&
+    typeof window !== "undefined" &&
+    (
+      new URLSearchParams(window.location.search).get("e2eBypass") === "1" ||
+      window.localStorage.getItem("mark.e2e.auth.bypass") === "true"
+    );
 
   if (!cloudInitialized) {
     return <div className="min-h-screen bg-background" />;
   }
-  if (!cloudUser) return <Navigate to="/welcome" replace />;
+  if (!cloudUser && !e2eBypass) return <Navigate to="/welcome" replace />;
 
   return (
     <AppLayout>

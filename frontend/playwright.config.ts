@@ -8,15 +8,15 @@ export default defineConfig({
   retries: 1,
   reporter: "list",
   use: {
-    baseURL: "http://127.0.0.1:5173",
+    baseURL: "http://127.0.0.1:4173",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
   },
   webServer: {
-    command: "npm run dev -- --host 127.0.0.1 --port 5173",
-    url: "http://127.0.0.1:5173",
-    reuseExistingServer: true,
+    command: "VITE_E2E_BYPASS_AUTH=true npm run dev -- --host 127.0.0.1 --port 4173",
+    url: "http://127.0.0.1:4173",
+    reuseExistingServer: false,
     timeout: 120_000,
   },
   projects: [

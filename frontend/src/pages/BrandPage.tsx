@@ -9,6 +9,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useBrandStore } from "@/lib/brand-store";
+import { useCampaignsStore } from "@/lib/campaigns-list-store";
+import { trainBrandVoice } from "@/lib/api";
 import { HUBSPOT_DESCRIPTION_TEMPLATE } from "@/lib/crm-parser";
 import { toast } from "@/hooks/use-toast";
 
@@ -182,13 +184,57 @@ function Field({
 // ── Main page ──────────────────────────────────────────────────────────────
 
 export default function BrandPage() {
-  const { brand, updateBrand, updateDesignTokens, reset, importedFromCrm } = useBrandStore();
+  const {
+    brand,
+    voiceProfile,
+    updateBrand,
+    updateDesignTokens,
+    setVoiceProfile,
+    reset,
+    importedFromCrm,
+  } = useBrandStore();
+  const campaigns = useCampaignsStore((s) => s.campaigns);
   const [saved, setSaved] = useState(false);
+  const [isTrainingVoice, setIsTrainingVoice] = useState(false);
 
   const handleSave = () => {
     setSaved(true);
     toast({ title: "Brand saved", description: "Your brand settings have been saved." });
     setTimeout(() => setSaved(false), 2000);
+  };
+
+  const handleTrainVoice = async () => {
+    setIsTrainingVoice(true);
+    try {
+      const approved = campaigns.filter((c) => c.status === "approved" || c.status === "sent");
+      const campaignExamples = approved.slice(0, 8).map((c) => `${c.name}: ${c.prompt}`);
+      const htmlSamples = approved
+        .flatMap((c) => c.emails.map((e) => e.htmlContent))
+        .filter(Boolean)
+        .slice(0, 6);
+      const result = await trainBrandVoice({
+        brand_name: brand.brandName,
+        current_voice: brand.voiceGuidelines,
+        campaign_examples: campaignExamples,
+        approved_html_samples: htmlSamples,
+      });
+      setVoiceProfile(result.profile);
+      updateBrand({
+        voiceGuidelines: result.profile.style_summary || brand.voiceGuidelines,
+      });
+      toast({
+        title: "Voice profile trained",
+        description: result.reasoning || "Brand voice profile updated from approved campaigns.",
+      });
+    } catch (err) {
+      toast({
+        title: "Voice training failed",
+        description: err instanceof Error ? err.message : "Could not train voice profile.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsTrainingVoice(false);
+    }
   };
 
   return (
@@ -266,6 +312,10 @@ export default function BrandPage() {
           <TabsTrigger value="compliance" className="gap-1.5 text-xs">
             <Shield className="h-3.5 w-3.5" />
             Compliance
+          </TabsTrigger>
+          <TabsTrigger value="voice-training" className="gap-1.5 text-xs">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Voice Training
           </TabsTrigger>
         </TabsList>
 
@@ -562,6 +612,62 @@ export default function BrandPage() {
                   {HUBSPOT_DESCRIPTION_TEMPLATE}
                 </pre>
               </div>
+            </Section>
+          </motion.div>
+        </TabsContent>
+
+        <TabsContent value="voice-training">
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-4"
+          >
+            <Section
+              icon={<CheckCircle2 className="h-4 w-4 text-primary" />}
+              title="Brand Voice Training Mode"
+              description="Learn your writing style from approved and sent campaigns."
+            >
+              <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
+                <p className="text-xs text-muted-foreground">
+                  Uses your approved campaign history to infer tone patterns, vocabulary, and writing rules.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  className="text-xs h-9"
+                  onClick={handleTrainVoice}
+                  disabled={isTrainingVoice}
+                >
+                  {isTrainingVoice ? "Training..." : "Train Voice Profile"}
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Source campaigns: {campaigns.filter((c) => c.status === "approved" || c.status === "sent").length}
+                </p>
+              </div>
+
+              {voiceProfile && (
+                <div className="space-y-3 rounded-lg border border-border bg-card p-4">
+                  <p className="text-sm font-semibold text-foreground">Trained Voice Profile</p>
+                  <p className="text-xs text-muted-foreground">{voiceProfile.style_summary}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Confidence: <span className="text-foreground font-medium">{voiceProfile.confidence}</span>
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <p className="text-xs font-medium text-foreground mb-1">Do</p>
+                      {voiceProfile.do_list.slice(0, 5).map((item) => (
+                        <p key={item} className="text-xs text-muted-foreground">- {item}</p>
+                      ))}
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-foreground mb-1">Don't</p>
+                      {voiceProfile.dont_list.slice(0, 5).map((item) => (
+                        <p key={item} className="text-xs text-muted-foreground">- {item}</p>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </Section>
           </motion.div>
         </TabsContent>

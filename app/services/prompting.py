@@ -985,3 +985,428 @@ CURRENT HTML:
 Return a JSON object with a single key "email_html" whose value is the complete updated HTML string.
 Start the HTML with <!DOCTYPE html> and end with </html>.
 """
+
+
+VARIANT_PREDICT_SCHEMA: dict = {
+    "type": "object",
+    "required": ["best_subject", "best_cta", "subjects", "ctas"],
+    "properties": {
+        "best_subject": {"type": "string"},
+        "best_cta": {"type": "string"},
+        "subjects": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["text", "score", "rationale"],
+                "properties": {
+                    "text": {"type": "string"},
+                    "score": {"type": "integer", "minimum": 0, "maximum": 100},
+                    "rationale": {"type": "string"},
+                },
+            },
+        },
+        "ctas": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["text", "score", "rationale"],
+                "properties": {
+                    "text": {"type": "string"},
+                    "score": {"type": "integer", "minimum": 0, "maximum": 100},
+                    "rationale": {"type": "string"},
+                },
+            },
+        },
+    },
+}
+
+
+def build_variant_predict_prompt(
+    subject_options: list[str],
+    cta_options: list[str],
+    audience: str,
+    offer: str,
+    objective: str,
+) -> str:
+    subjects = "\n".join(f"- {s}" for s in subject_options) or "- (none)"
+    ctas = "\n".join(f"- {c}" for c in cta_options) or "- (none)"
+    return f"""\
+You are a conversion-rate optimization specialist.
+
+Campaign context:
+- Audience: {audience}
+- Offer: {offer}
+- Objective: {objective}
+
+Subject options:
+{subjects}
+
+CTA options:
+{ctas}
+
+Score each option 0-100 for likely open/click performance, clarity, specificity, and trust.
+Return best_subject and best_cta plus a scored list for all options.
+Return only valid JSON.
+"""
+
+
+PERFORMANCE_COPILOT_SCHEMA: dict = {
+    "type": "object",
+    "required": ["summary", "wins", "risks", "next_actions"],
+    "properties": {
+        "summary": {"type": "string"},
+        "wins": {"type": "array", "items": {"type": "string"}},
+        "risks": {"type": "array", "items": {"type": "string"}},
+        "next_actions": {"type": "array", "items": {"type": "string"}},
+    },
+}
+
+
+def build_performance_copilot_prompt(
+    campaign_name: str,
+    prompt: str,
+    sent_count: int,
+    failed_count: int,
+    open_rate: float | None,
+    click_rate: float | None,
+    notes: str | None,
+) -> str:
+    return f"""\
+You are a campaign analytics copilot.
+Analyze this campaign and produce practical recommendations.
+
+Campaign: {campaign_name}
+Original prompt: {prompt}
+Sent count: {sent_count}
+Failed count: {failed_count}
+Open rate: {open_rate if open_rate is not None else "unknown"}
+Click rate: {click_rate if click_rate is not None else "unknown"}
+Notes: {notes or ""}
+
+Return:
+- summary: 1-2 sentence overview
+- wins: 2-4 bullets
+- risks: 2-4 bullets
+- next_actions: 3-5 concrete next steps
+
+Return only valid JSON.
+"""
+
+
+SMART_BRIEF_SCHEMA: dict = {
+    "type": "object",
+    "required": ["brief", "questions"],
+    "properties": {
+        "brief": {
+            "type": "object",
+            "required": [
+                "campaign_name",
+                "objective",
+                "target_audience",
+                "offer",
+                "primary_kpi",
+                "geo_scope",
+                "language",
+                "tone",
+                "compliance_notes",
+                "send_window",
+                "number_of_emails",
+                "key_points",
+                "assumptions",
+            ],
+            "properties": {
+                "campaign_name": {"type": "string"},
+                "objective": {"type": "string"},
+                "target_audience": {"type": "string"},
+                "offer": {"type": "string"},
+                "primary_kpi": {"type": "string"},
+                "geo_scope": {"type": "string"},
+                "language": {"type": "string"},
+                "tone": {"type": "string"},
+                "compliance_notes": {"type": "string"},
+                "send_window": {"type": "string"},
+                "number_of_emails": {"type": "integer", "minimum": 1, "maximum": 10},
+                "key_points": {"type": "array", "items": {"type": "string"}},
+                "assumptions": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+        "questions": {"type": "array", "items": {"type": "string"}},
+    },
+}
+
+
+def build_smart_brief_prompt(user_prompt: str) -> str:
+    return f"""\
+You are an expert campaign planner. Convert this free-form prompt into a structured campaign brief.
+
+Prompt:
+{user_prompt}
+
+Rules:
+- Be concrete and concise.
+- If details are missing, use reasonable defaults and note assumptions.
+- number_of_emails must be between 1 and 10.
+- primary_kpi should be one of: revenue, conversion_rate, open_rate, click_through_rate, leads_generated, brand_awareness, customer_retention, average_order_value, roas.
+
+Return JSON with:
+- brief: structured fields
+- questions: up to 5 targeted follow-up questions for missing high-impact details
+
+Return only valid JSON.
+"""
+
+
+SEGMENT_DISCOVERY_SCHEMA: dict = {
+    "type": "object",
+    "required": ["segments", "reasoning"],
+    "properties": {
+        "segments": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["name", "description", "recommended_for"],
+                "properties": {
+                    "name": {"type": "string"},
+                    "description": {"type": "string"},
+                    "recommended_for": {"type": "string"},
+                },
+            },
+        },
+        "reasoning": {"type": "string"},
+    },
+}
+
+
+def build_segment_discovery_prompt(
+    campaign_prompt: str,
+    field_summaries: list[str],
+    sample_contacts: list[str],
+    max_segments: int,
+) -> str:
+    summaries = "\n".join(f"- {line}" for line in field_summaries) or "- no summaries"
+    samples = "\n".join(f"- {line}" for line in sample_contacts) or "- no sample contacts"
+    return f"""\
+You are a CRM segmentation strategist.
+Suggest up to {max_segments} practical audience segments for campaign targeting.
+
+Campaign context:
+{campaign_prompt or "(not provided)"}
+
+CRM field distributions:
+{summaries}
+
+Sample contacts:
+{samples}
+
+Return:
+- segments: list of segment suggestions (name, description, recommended_for)
+- reasoning: 1-2 sentence summary
+
+Return only valid JSON.
+"""
+
+
+SEND_TIME_SCHEMA: dict = {
+    "type": "object",
+    "required": ["adjustments", "global_reasoning"],
+    "properties": {
+        "adjustments": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["email_id", "recommended_hour_local", "rationale"],
+                "properties": {
+                    "email_id": {"type": "string"},
+                    "recommended_hour_local": {"type": "integer", "minimum": 0, "maximum": 23},
+                    "rationale": {"type": "string"},
+                },
+            },
+        },
+        "global_reasoning": {"type": "string"},
+    },
+}
+
+
+def build_send_time_prompt(
+    campaign_prompt: str,
+    dominant_timezone: str,
+    base_recommendations: list[str],
+) -> str:
+    base = "\n".join(f"- {line}" for line in base_recommendations)
+    return f"""\
+You are an email deliverability and timing specialist.
+Refine send-time recommendations for each email variant.
+
+Campaign context:
+{campaign_prompt or "(not provided)"}
+
+Dominant timezone:
+{dominant_timezone}
+
+Base recommendations:
+{base}
+
+Rules:
+- Keep hour values in 0-23 local time.
+- Favor realistic business send windows unless audience suggests otherwise.
+- Preserve each email_id exactly.
+
+Return only valid JSON.
+"""
+
+
+VOICE_TRAIN_SCHEMA: dict = {
+    "type": "object",
+    "required": ["profile", "reasoning"],
+    "properties": {
+        "profile": {
+            "type": "object",
+            "required": ["style_summary", "do_list", "dont_list", "vocabulary", "sample_lines", "confidence"],
+            "properties": {
+                "style_summary": {"type": "string"},
+                "do_list": {"type": "array", "items": {"type": "string"}},
+                "dont_list": {"type": "array", "items": {"type": "string"}},
+                "vocabulary": {"type": "array", "items": {"type": "string"}},
+                "sample_lines": {"type": "array", "items": {"type": "string"}},
+                "confidence": {"type": "integer", "minimum": 0, "maximum": 100},
+            },
+        },
+        "reasoning": {"type": "string"},
+    },
+}
+
+
+def build_voice_train_prompt(
+    brand_name: str,
+    current_voice: str,
+    campaign_examples: list[str],
+    approved_html_samples: list[str],
+) -> str:
+    examples = "\n".join(f"- {item}" for item in campaign_examples[:8]) or "- none"
+    snippets = "\n".join(f"- {item[:220]}" for item in approved_html_samples[:6]) or "- none"
+    return f"""\
+You are a brand voice analyst.
+Build a reusable voice profile from campaign examples and approved copy.
+
+Brand: {brand_name or "Unknown brand"}
+Current voice guidance: {current_voice or "(not provided)"}
+
+Campaign examples:
+{examples}
+
+Approved copy snippets:
+{snippets}
+
+Return:
+- profile with style summary, do_list, dont_list, vocabulary, sample_lines, confidence
+- reasoning summary
+
+Return only valid JSON.
+"""
+
+
+LOCALIZE_SCHEMA: dict = {
+    "type": "object",
+    "required": ["emails", "reasoning"],
+    "properties": {
+        "emails": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["id", "subject", "html_content", "notes"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "subject": {"type": "string"},
+                    "html_content": {"type": "string"},
+                    "notes": {"type": "string"},
+                },
+            },
+        },
+        "reasoning": {"type": "string"},
+    },
+}
+
+
+def build_localize_prompt(
+    language: str,
+    region: str,
+    brand_voice: str,
+    legal_footer: str,
+    emails: list[dict[str, str]],
+) -> str:
+    rows = "\n".join(
+        f"- id={item.get('id')} | subject={item.get('subject')} | target={item.get('target_group')}"
+        for item in emails
+    )
+    return f"""\
+You are a localization specialist for marketing content.
+Adapt each email for language and regional context (not literal translation).
+
+Target language: {language}
+Target region: {region or "global"}
+Brand voice: {brand_voice or "professional and friendly"}
+Legal footer requirement: {legal_footer or "(none)"}
+
+Emails to localize:
+{rows}
+
+Keep HTML structure valid and preserve links/placeholders.
+Return localized subject and localized html_content for every id.
+
+Return only valid JSON.
+"""
+
+
+REPURPOSE_SCHEMA: dict = {
+    "type": "object",
+    "required": ["assets", "reasoning"],
+    "properties": {
+        "assets": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["channel", "title", "body", "cta"],
+                "properties": {
+                    "channel": {"type": "string"},
+                    "title": {"type": "string"},
+                    "body": {"type": "string"},
+                    "cta": {"type": "string"},
+                },
+            },
+        },
+        "reasoning": {"type": "string"},
+    },
+}
+
+
+def build_repurpose_prompt(
+    campaign_name: str,
+    objective: str,
+    channels: list[str],
+    emails: list[dict[str, str]],
+) -> str:
+    channel_str = ", ".join(channels) or "social_post"
+    email_rows = "\n".join(
+        f"- {item.get('id')}: {item.get('subject')} | {item.get('target_group')}"
+        for item in emails
+    )
+    return f"""\
+You are a content repurposing strategist.
+Convert campaign emails into channel-ready assets.
+
+Campaign: {campaign_name or "Campaign"}
+Objective: {objective or "Drive engagement"}
+Channels: {channel_str}
+
+Email context:
+{email_rows}
+
+For each requested channel, return at least one asset with:
+- channel
+- title
+- body
+- cta
+
+Keep copy concise and channel-appropriate.
+Return only valid JSON.
+"""

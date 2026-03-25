@@ -15,6 +15,7 @@ interface CampaignState {
   generatedEmails: GeneratedEmail[];
   setGeneratedEmails: (emails: GeneratedEmail[]) => void;
   updateEmailHtml: (id: string, html: string) => void;
+  updateEmailContent: (id: string, updates: Partial<Pick<GeneratedEmail, "subject" | "htmlContent">>) => void;
   generationReport: AiReport | null;
   setGenerationReport: (report: AiReport | null) => void;
 
@@ -45,6 +46,12 @@ export const useCampaignStore = create<CampaignState>((set) => ({
     set((state) => ({
       generatedEmails: state.generatedEmails.map((e) =>
         e.id === id ? { ...e, htmlContent: html } : e
+      ),
+    })),
+  updateEmailContent: (id, updates) =>
+    set((state) => ({
+      generatedEmails: state.generatedEmails.map((email) =>
+        email.id === id ? { ...email, ...updates } : email
       ),
     })),
 
