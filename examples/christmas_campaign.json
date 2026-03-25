@@ -1,0 +1,66 @@
+{
+  "campaign_name": "Christmas Discount 2025",
+  "brand": {
+    "brand_name": "AcmeCorp",
+    "voice_guidelines": "Warm, festive, and friendly. Use inclusive, celebratory language. Avoid corporate buzzwords. Write like a knowledgeable friend, not a salesperson.",
+    "banned_phrases": [
+      "world-class",
+      "revolutionary",
+      "synergy",
+      "game-changer",
+      "best-in-class",
+      "cutting-edge",
+      "disrupting"
+    ],
+    "required_phrases": [
+      "Shop now",
+      "Limited time offer"
+    ],
+    "legal_footer": "© 2025 AcmeCorp Inc. | Unsubscribe | Privacy Policy | Terms of Service",
+    "design_tokens": {
+      "primary_color": "#B22222",
+      "secondary_color": "#FFFFFF",
+      "accent_color": "#FFD700",
+      "font_family_heading": "Georgia, serif",
+      "font_family_body": "Arial, sans-serif",
+      "font_size_base": "16px",
+      "line_height": "1.6",
+      "spacing_unit": "8px",
+      "border_radius": "4px",
+      "logo_url": "https://cdn.acmecorp.com/logo-white.png"
+    }
+  },
+  "objective": {
+    "primary_kpi": "revenue",
+    "secondary_kpis": [
+      "open_rate",
+      "click_through_rate"
+    ],
+    "target_audience": "Existing customers who made at least one purchase in the last 12 months, aged 25–55, located in the continental US.",
+    "offer": "25% discount on all products sitewide for Christmas. No minimum order. Use code XMAS25 at checkout.",
+    "geo_scope": "United States",
+    "language": "English"
+  },
+  "constraints": {
+    "discount_ceiling": 25.0,
+    "compliance_notes": "CAN-SPAM compliant. No misleading or false urgency claims. Subject lines must not be deceptive. Include physical mailing address in footer.",
+    "send_window": "December 18–24, 2025",
+    "exclude_segments": [
+      "unsubscribed",
+      "hard-bounced",
+      "VIP-loyalty-program"
+    ],
+    "required_segments": [
+      "active-customers",
+      "email-verified"
+    ]
+  },
+  "channels": [
+    "email"
+  ],
+  "deliverables": {
+    "number_of_emails": 3,
+    "include_html": true,
+    "include_variants": true
+  }
+}

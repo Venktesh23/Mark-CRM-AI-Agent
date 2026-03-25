@@ -1,0 +1,142 @@
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;500;600;700;800&family=Fragment+Mono&display=swap');
+
+@font-face {
+  font-family: 'Casad';
+  src: url('/fonts/Casad-Serial-Heavy_Regular.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 26 62% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 26 62% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 26 62% 15%;
+
+    --primary: 13 93% 55%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 14 93% 92%;
+    --secondary-foreground: 26 62% 15%;
+
+    --muted: 14 30% 94%;
+    --muted-foreground: 26 40% 40%;
+
+    --accent: 14 93% 66%;
+    --accent-foreground: 26 62% 15%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 26 20% 85%;
+    --input: 0 0% 98%;
+    --ring: 13 93% 55%;
+
+    --radius: 0.5rem;
+
+    --mark-red: 13 93% 55%;
+    --mark-red-light: 14 93% 92%;
+    --mark-red-glow: 15 93% 46%;
+    --mark-detail: 26 62% 15%;
+    --mark-gradient: linear-gradient(135deg, hsl(13 93% 55%), hsl(15 93% 46%));
+    --mark-gradient-subtle: linear-gradient(135deg, hsl(14 93% 92%), hsl(14 30% 94%));
+    --mark-shadow: 0 4px 24px -4px hsl(13 93% 55% / 0.2);
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 26 62% 15%;
+    --sidebar-primary: 13 93% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 14 93% 92%;
+    --sidebar-accent-foreground: 15 93% 46%;
+    --sidebar-border: 26 20% 85%;
+    --sidebar-ring: 13 93% 55%;
+  }
+
+  .dark {
+    --background: 26 40% 6%;
+    --foreground: 14 30% 92%;
+
+    --card: 26 40% 10%;
+    --card-foreground: 14 30% 92%;
+
+    --popover: 26 40% 10%;
+    --popover-foreground: 14 30% 92%;
+
+    --primary: 13 93% 55%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 26 30% 16%;
+    --secondary-foreground: 14 30% 92%;
+
+    --muted: 26 30% 16%;
+    --muted-foreground: 26 20% 50%;
+
+    --accent: 15 93% 46%;
+    --accent-foreground: 14 93% 66%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 95%;
+
+    --border: 26 30% 20%;
+    --input: 26 30% 20%;
+    --ring: 13 93% 55%;
+    --sidebar-background: 26 40% 8%;
+    --sidebar-foreground: 14 30% 90%;
+    --sidebar-primary: 13 93% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 15 93% 20%;
+    --sidebar-accent-foreground: 14 93% 66%;
+    --sidebar-border: 26 30% 20%;
+    --sidebar-ring: 13 93% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Nunito', sans-serif;
+    letter-spacing: -0.005em;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Casad', 'Nunito', sans-serif;
+    letter-spacing: -0.02em;
+  }
+}
+
+@layer utilities {
+  .gradient-text {
+    background: linear-gradient(135deg, hsl(13 93% 55%), hsl(15 93% 46%));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .mark-glow {
+    box-shadow: 0 0 60px -15px hsl(13 93% 55% / 0.15);
+  }
+
+  .glass-card {
+    backdrop-filter: blur(16px);
+    background: hsl(0 0% 100% / 0.85);
+    border: 1px solid hsl(26 20% 85%);
+  }
+
+  .font-mono-display {
+    font-family: 'Fragment Mono', monospace;
+  }
+}
