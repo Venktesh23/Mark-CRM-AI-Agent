@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
 import { useCampaignStore } from "@/lib/campaign-store";
+import { useCampaignsStore } from "@/lib/campaigns-list-store";
 import { generateCampaign, type ClarificationQuestion } from "@/lib/api";
 import { useBrandStore } from "@/lib/brand-store";
 import { useNavigate } from "react-router-dom";
@@ -118,11 +119,13 @@ export default function CreatePage() {
     prompt,
     setPrompt,
     setGeneratedEmails,
+    setGenerationReport,
     setStep,
     isGenerating,
     setIsGenerating,
   } = useCampaignStore();
   const brand = useBrandStore((s) => s.brand);
+  const campaigns = useCampaignsStore((s) => s.campaigns);
 
   const [clarificationQuestions, setClarificationQuestions] = useState<ClarificationQuestion[]>([]);
   const [clarificationAnswers, setClarificationAnswers] = useState<Record<string, string>>({});
@@ -141,8 +144,14 @@ export default function CreatePage() {
     const activePrompt = enrichedPrompt ?? prompt;
     if (!activePrompt.trim()) return;
     setError(null);
+    setGenerationReport(null);
     setIsGenerating(true);
     console.log("Generating campaign with prompt:", activePrompt);
+    const campaignMemory = campaigns
+      .filter((c) => c.status === "approved" || c.status === "sent")
+      .slice(0, 5)
+      .map((c) => `${c.name}: ${c.prompt}`);
+
     try {
       const response = await generateCampaign({
         prompt: activePrompt,
@@ -156,6 +165,7 @@ export default function CreatePage() {
           legalFooter: brand.legalFooter,
           designTokens: brand.designTokens,
         } : undefined,
+        campaign_memory: campaignMemory,
       });
       console.log("Campaign response:", response);
 
@@ -166,6 +176,7 @@ export default function CreatePage() {
       }
 
       setGeneratedEmails(response.emails);
+      setGenerationReport(response.ai_report ?? null);
       setStep(1);
       navigate("/review");
     } catch (err) {

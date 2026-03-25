@@ -6,6 +6,8 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+import csv
+from io import StringIO
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
@@ -209,11 +211,67 @@ def _map_to_simple_response(
                 ),
             )
         )
+    ai_report: dict = {
+        "quality_score": campaign_resp.critique.score if campaign_resp.critique else None,
+        "issues": campaign_resp.critique.issues[:8] if campaign_resp.critique else [],
+        "risk_flags": campaign_resp.critique.risk_flags[:8] if campaign_resp.critique else [],
+        "guardrails_passed": not bool(campaign_resp.critique and campaign_resp.critique.risk_flags),
+        "tokens_estimate": campaign_resp.metadata.tokens_estimate if campaign_resp.metadata else 0,
+        "timings_ms": campaign_resp.metadata.timings.model_dump() if campaign_resp.metadata else {},
+        "model_used": campaign_resp.metadata.model_used if campaign_resp.metadata else "",
+        "subject_recommendations": [
+            {
+                "email_id": f"email-{asset.email_number}",
+                "recommended": asset.subject_lines[0] if asset.subject_lines else "",
+                "alternatives": asset.subject_lines[1:5] if asset.subject_lines else [],
+            }
+            for asset in campaign_resp.assets
+        ],
+    }
+
     return SimpleCampaignResponse(
         id=request_id,
         status="completed",
         emails=emails,
+        ai_report=ai_report,
     )
+
+
+def _parse_contacts_csv(contacts_csv: str) -> list[dict[str, str]]:
+    reader = csv.DictReader(StringIO(contacts_csv.strip()))
+    contacts: list[dict[str, str]] = []
+    for row in reader:
+        contacts.append({(k or "").strip().lower(): (v or "").strip() for k, v in row.items()})
+    return contacts
+
+
+def _deterministic_match_score(target_group: str, contact: dict[str, str]) -> int:
+    text = target_group.lower()
+    score = 0
+    membership = (contact.get("membership_level") or "").lower()
+    city = (contact.get("city") or "").lower()
+    country = (contact.get("country") or "").lower()
+    age_raw = (contact.get("age") or "").strip()
+
+    if membership and membership in text:
+        score += 4
+    if city and city in text:
+        score += 3
+    if country and country in text:
+        score += 3
+
+    try:
+        age = int(age_raw)
+    except ValueError:
+        age = None
+    if age is not None:
+        if ("young" in text or "gen z" in text) and age <= 29:
+            score += 2
+        if ("professional" in text or "working" in text) and 25 <= age <= 50:
+            score += 2
+        if ("senior" in text or "retire" in text) and age >= 55:
+            score += 2
+    return score
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -242,7 +300,11 @@ async def generate_from_prompt(
     # ── Phase 0: parse free-form prompt ───────────────────────────────────────
     try:
         parse_result = client.generate_text(
-            prompt=prompting.build_parse_prompt(payload.prompt, force_proceed=payload.force_proceed),
+            prompt=prompting.build_parse_prompt(
+                payload.prompt,
+                force_proceed=payload.force_proceed,
+                campaign_memory=payload.campaign_memory,
+            ),
             system_instruction=prompting.SHARED_SYSTEM_INSTRUCTION,
             json_schema=prompting.PARSE_SCHEMA,
             temperature=0.1,
@@ -287,6 +349,7 @@ async def generate_from_prompt(
             req=campaign_req,
             request_id=request_id,
             client=client,
+            campaign_memory=payload.campaign_memory,
         )
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -565,9 +628,54 @@ Return ONLY valid JSON — no code fences, no prose — in exactly this shape:
             if eid in valid_ids and isinstance(addrs, list):
                 assignments[eid] = [a for a in addrs if isinstance(a, str) and "@" in a]
 
+    # Hybrid pass: enforce deterministic constraints + fill gaps via rule-based scoring.
+    contacts = _parse_contacts_csv(payload.contacts_csv)
+    best_by_email: dict[str, list[tuple[str, int]]] = {e.id: [] for e in payload.emails}
+    seen_emails: set[str] = set()
+
+    # Keep AI picks first but de-duplicate globally.
+    for eid in list(assignments.keys()):
+        cleaned: list[str] = []
+        for addr in assignments[eid]:
+            email = addr.strip().lower()
+            if "@" not in email or email in seen_emails:
+                continue
+            seen_emails.add(email)
+            cleaned.append(email)
+        assignments[eid] = cleaned
+
+    # Deterministic supplement for contacts AI left unassigned.
+    for contact in contacts:
+        addr = (contact.get("email") or "").strip().lower()
+        if not addr or "@" not in addr or addr in seen_emails:
+            continue
+        scored = [
+            (variant.id, _deterministic_match_score(variant.target_group, contact))
+            for variant in payload.emails
+        ]
+        scored.sort(key=lambda item: item[1], reverse=True)
+        if not scored or scored[0][1] <= 0:
+            continue
+        best_id, best_score = scored[0]
+        best_by_email[best_id].append((addr, best_score))
+        seen_emails.add(addr)
+
+    for eid, items in best_by_email.items():
+        if not items:
+            continue
+        assignments.setdefault(eid, [])
+        assignments[eid].extend(addr for addr, _ in items)
+        assignments[eid] = list(dict.fromkeys(assignments[eid]))
+
     reasoning = parsed.get("reasoning", "")
     if not isinstance(reasoning, str):
         reasoning = ""
+    deterministic_count = sum(len(items) for items in best_by_email.values())
+    if deterministic_count:
+        reasoning = (
+            (reasoning + " " if reasoning else "")
+            + f"Deterministic matching added {deterministic_count} contact(s) using geography/membership/age rules."
+        )
 
     logger.info(
         "[recommend-recipients] assigned %d total contacts across %d variants",

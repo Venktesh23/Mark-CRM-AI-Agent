@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { GeneratedEmail } from "./mock-api";
+import type { AiReport } from "./api";
 
 interface CampaignState {
   // Step tracking
@@ -14,6 +15,8 @@ interface CampaignState {
   generatedEmails: GeneratedEmail[];
   setGeneratedEmails: (emails: GeneratedEmail[]) => void;
   updateEmailHtml: (id: string, html: string) => void;
+  generationReport: AiReport | null;
+  setGenerationReport: (report: AiReport | null) => void;
 
   // Send page
   emailAssignments: Record<string, string[]>;
@@ -36,6 +39,8 @@ export const useCampaignStore = create<CampaignState>((set) => ({
 
   generatedEmails: [],
   setGeneratedEmails: (emails) => set({ generatedEmails: emails }),
+  generationReport: null,
+  setGenerationReport: (report) => set({ generationReport: report }),
   updateEmailHtml: (id, html) =>
     set((state) => ({
       generatedEmails: state.generatedEmails.map((e) =>
@@ -57,6 +62,7 @@ export const useCampaignStore = create<CampaignState>((set) => ({
       currentStep: 0,
       prompt: "",
       generatedEmails: [],
+      generationReport: null,
       emailAssignments: {},
       isGenerating: false,
     }),

@@ -146,7 +146,7 @@ class TestGenerateFromPrompt:
         The cache is keyed on the parsed CampaignRequest.
         A repeated prompt should return the same emails without a second rapid-batch Gemini call.
         We verify this by counting how many times generate_text is called across two requests:
-        - First request:  2 calls (parse + rapid_batch)
+        - First request:  >=2 calls (parse + generation + optional critique/revision calls)
         - Second request: 1 call  (parse only; rapid_batch result comes from cache)
         """
         mock = _make_mock_client(_PARSED_CAMPAIGN, _RAPID_BATCH_EMAIL)
@@ -173,7 +173,7 @@ class TestGenerateFromPrompt:
         assert resp2.status_code == 200
         second_call_count = mock.generate_text.call_count  # expect 1 (parse only)
 
-        assert first_call_count == 2, f"Expected 2 calls on first request, got {first_call_count}"
+        assert first_call_count >= 2, f"Expected at least 2 calls on first request, got {first_call_count}"
         assert second_call_count == 1, f"Expected 1 call on cache-hit request, got {second_call_count}"
         assert resp2.json()["emails"][0]["subject"] == resp1.json()["emails"][0]["subject"]
 

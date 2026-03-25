@@ -37,6 +37,8 @@ export default function SendPage() {
 
   // Resolve the campaign prompt — prefer the saved campaign record, fall back to the in-flight store
   const campaignPrompt = (campaignId ? campaigns.find((c) => c.id === campaignId)?.prompt : null) ?? storePrompt ?? null;
+  const campaignGuardrailsPassed =
+    campaignId ? (campaigns.find((c) => c.id === campaignId)?.aiReport?.guardrails_passed ?? true) : true;
   const [configuredFromEmail, setConfiguredFromEmail] = useState("");
 
   // Fetch the configured sender email from the backend once
@@ -203,6 +205,14 @@ export default function SendPage() {
     plainTexts: Record<string, string>;
     subjects: Record<string, string>;
   }) => {
+    if (!campaignGuardrailsPassed) {
+      toast({
+        title: "Guardrails failed",
+        description: "Resolve AI risk flags in review before sending.",
+        variant: "destructive",
+      });
+      return;
+    }
     const tasks: CampaignSendTask[] = [];
     for (const email of generatedEmails) {
       const recipients = emailAssignments[email.id] ?? [];

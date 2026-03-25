@@ -327,6 +327,10 @@ class PromptRequest(BaseModel):
         default=None,
         description="Optional brand context from the frontend brand store. Overrides prompt-parsed brand fields.",
     )
+    campaign_memory: list[str] = Field(
+        default_factory=list,
+        description="Short snippets from previously successful campaigns to guide style and strategy.",
+    )
 
 
 class SimpleSummary(BaseModel):
@@ -357,6 +361,7 @@ class SimpleCampaignResponse(BaseModel):
     status: str  # "completed" | "needs_clarification"
     questions: list[SimpleClarificationQuestion] = Field(default_factory=list)
     emails: list[SimpleEmail] = Field(default_factory=list)
+    ai_report: Optional[dict[str, Any]] = None
 
 
 class EmailEditRequest(BaseModel):

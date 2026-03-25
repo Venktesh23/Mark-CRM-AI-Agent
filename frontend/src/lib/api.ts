@@ -46,6 +46,22 @@ export interface CampaignRequest {
   prompt: string;
   force_proceed?: boolean;
   brand_context?: BrandContextPayload;
+  campaign_memory?: string[];
+}
+
+export interface AiReport {
+  quality_score: number | null;
+  issues: string[];
+  risk_flags: string[];
+  guardrails_passed: boolean;
+  tokens_estimate: number;
+  timings_ms: Record<string, number | null>;
+  model_used: string;
+  subject_recommendations: Array<{
+    email_id: string;
+    recommended: string;
+    alternatives: string[];
+  }>;
 }
 
 export interface CampaignResponse {
@@ -53,6 +69,7 @@ export interface CampaignResponse {
   status: "completed" | "needs_clarification";
   questions?: ClarificationQuestion[];
   emails: GeneratedEmail[];
+  ai_report?: AiReport;
 }
 
 function isLocalOnlyMode(): boolean {
@@ -126,6 +143,7 @@ export async function generateCampaign(request: CampaignRequest): Promise<Campai
         id: string;
         status: "completed" | "needs_clarification";
         questions?: ClarificationQuestion[];
+        ai_report?: AiReport;
         emails?: Array<{
           id: string;
           subject: string;
@@ -151,6 +169,7 @@ export async function generateCampaign(request: CampaignRequest): Promise<Campai
         status: data.status,
         questions: data.questions ?? [],
         emails: (data.emails ?? []).map(mapEmail),
+        ai_report: data.ai_report,
       };
     } catch (error) {
       if (!(error instanceof TypeError)) throw error;
@@ -163,6 +182,20 @@ export async function generateCampaign(request: CampaignRequest): Promise<Campai
     id: `local-${Date.now()}`,
     status: "completed",
     emails: localEmails,
+    ai_report: {
+      quality_score: null,
+      issues: [],
+      risk_flags: [],
+      guardrails_passed: true,
+      tokens_estimate: 0,
+      timings_ms: {},
+      model_used: "local-fallback",
+      subject_recommendations: localEmails.map((email) => ({
+        email_id: email.id,
+        recommended: email.subject,
+        alternatives: [],
+      })),
+    },
   };
 }
 

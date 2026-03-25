@@ -33,6 +33,8 @@ from app.services import prompting
 from app.services.validators import run_email_rules
 
 logger = logging.getLogger(__name__)
+_AUTO_REVISION_SCORE_THRESHOLD = 80
+_MAX_AUTO_REVISION_ATTEMPTS = 1
 
 
 def _ms(start: float) -> float:
@@ -152,16 +154,67 @@ def _render_email_html(req: CampaignRequest, sections: dict[str, Any]) -> str:
     return html
 
 
+def _subject_quality_score(subject: str) -> int:
+    """Simple deterministic score to pick strongest subject candidate."""
+    cleaned = (subject or "").strip()
+    if not cleaned:
+        return 0
+    score = 50
+    length = len(cleaned)
+    if 35 <= length <= 60:
+        score += 25
+    elif 25 <= length <= 70:
+        score += 12
+    if any(ch.isdigit() for ch in cleaned):
+        score += 4
+    if "?" in cleaned:
+        score += 3
+    spammy = ("free money", "buy now", "act now", "!!!", "$$$")
+    lowered = cleaned.lower()
+    if any(s in lowered for s in spammy):
+        score -= 20
+    if cleaned.count("!") > 1:
+        score -= 8
+    return max(0, min(100, score))
+
+
+def _optimize_subject_lines(subject_lines: list[str]) -> list[str]:
+    uniq: list[str] = []
+    seen: set[str] = set()
+    for line in subject_lines:
+        text = (line or "").strip()
+        key = text.lower()
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        uniq.append(text)
+    ranked = sorted(uniq, key=_subject_quality_score, reverse=True)
+    if len(ranked) < 3:
+        fallback = ["Your tailored offer inside", "A smarter way to reach your goal", "Ready to unlock your next win?"]
+        for item in fallback:
+            if item.lower() not in {s.lower() for s in ranked}:
+                ranked.append(item)
+            if len(ranked) >= 3:
+                break
+    return ranked[:5]
+
+
 def _phase_rapid_batch(
     req: CampaignRequest,
     client: GeminiClient,
-) -> list[EmailAsset]:
+    campaign_memory: list[str] | None = None,
+    revision_notes: list[str] | None = None,
+) -> tuple[list[EmailAsset], list[dict[str, Any]], int]:
     """
     Fast path: single Gemini call that replaces phases 2-6.
     Returns a list of EmailAsset objects with pre-rendered HTML.
     """
     result = client.generate_text(
-        prompt=prompting.build_rapid_batch_prompt(req),
+        prompt=prompting.build_rapid_batch_prompt(
+            req,
+            campaign_memory=campaign_memory,
+            revision_notes=revision_notes,
+        ),
         system_instruction=prompting.SHARED_SYSTEM_INSTRUCTION,
         json_schema=prompting.RAPID_BATCH_SCHEMA,
         temperature=0.35,
@@ -170,11 +223,14 @@ def _phase_rapid_batch(
 
     parsed = result.get("parsed") or {}
     raw_emails: list[dict] = parsed.get("emails") or []
+    tokens_used = int(result.get("tokens_used") or 0)
 
     assets: list[EmailAsset] = []
     for em in raw_emails:
         secs = em.get("sections") or {}
-        subject = (em.get("subject_lines") or [""])[0]
+        optimized_subjects = _optimize_subject_lines(em.get("subject_lines") or [])
+        em["subject_lines"] = optimized_subjects
+        subject = optimized_subjects[0] if optimized_subjects else ""
         secs["subject"] = subject  # pass to HTML renderer
         html = _render_email_html(req, secs) if req.deliverables.include_html else None
 
@@ -186,6 +242,7 @@ def _phase_rapid_batch(
                 secs.get("offer_line", ""),
                 *[f"• {b}" for b in (secs.get("body_bullets") or [])],
                 secs.get("urgency_line", ""),
+                secs.get("footer_line", ""),
             ])
         )
         rule_result = run_email_rules(
@@ -203,7 +260,7 @@ def _phase_rapid_batch(
             EmailAsset(
                 email_number=em.get("email_number", len(assets) + 1),
                 email_name=em.get("email_name", f"Email {len(assets)+1}"),
-                subject_lines=em.get("subject_lines") or [subject],
+                subject_lines=optimized_subjects or [subject],
                 preview_text_options=em.get("preview_text_options") or [],
                 body_text=body_text,
                 ctas=em.get("ctas") or [],
@@ -213,7 +270,7 @@ def _phase_rapid_batch(
             )
         )
 
-    return assets
+    return assets, raw_emails, tokens_used
 def _extract_html(raw: str) -> str:
     """Strip fences/prose and return the first complete HTML document found."""
     import json as _json
@@ -689,6 +746,7 @@ def orchestrate_campaign_fast(
     req: CampaignRequest,
     request_id: str,
     client: GeminiClient,
+    campaign_memory: list[str] | None = None,
 ) -> CampaignResponse:
     """
     Fast campaign generation: 1 Gemini call replaces phases 2-6.
@@ -707,22 +765,63 @@ def orchestrate_campaign_fast(
         extra={"request_id": request_id, "n_emails": req.deliverables.number_of_emails},
     )
 
+    total_tokens = 0
+    revision_attempts = 0
     t = time.perf_counter()
     try:
-        assets = _phase_rapid_batch(req, client)
+        assets, raw_emails, tokens_used = _phase_rapid_batch(
+            req,
+            client,
+            campaign_memory=campaign_memory,
+        )
+        total_tokens += tokens_used
     except Exception as exc:
         logger.exception("Rapid batch phase failed", extra={"request_id": request_id})
         raise ValueError(f"Email generation failed: {exc}") from exc
     rapid_ms = _ms(t)
     timings.execution_ms = rapid_ms   # execution + production combined
     timings.production_ms = 0.0
+    critique = _phase_critique(req, {}, assets, raw_emails, client)
+
+    # Critique-driven auto revision (single retry max)
+    for _ in range(_MAX_AUTO_REVISION_ATTEMPTS):
+        if critique.score >= _AUTO_REVISION_SCORE_THRESHOLD and not critique.risk_flags:
+            break
+        revision_attempts += 1
+        try:
+            revised_assets, revised_raw_emails, revised_tokens = _phase_rapid_batch(
+                req,
+                client,
+                campaign_memory=campaign_memory,
+                revision_notes=critique.fixes[:10] + critique.risk_flags[:5],
+            )
+            total_tokens += revised_tokens
+            revised_critique = _phase_critique(req, {}, revised_assets, revised_raw_emails, client)
+            if revised_critique.score >= critique.score:
+                assets = revised_assets
+                raw_emails = revised_raw_emails
+                critique = revised_critique
+        except Exception:
+            logger.exception("Auto-revision pass failed", extra={"request_id": request_id})
+            break
+
+    if critique.risk_flags:
+        for idx, asset in enumerate(assets):
+            assets[idx] = asset.model_copy(
+                update={
+                    "accessibility_notes": asset.accessibility_notes + critique.risk_flags[:8],
+                }
+            )
+
     timings.total_ms = _ms(total_start)
 
     logger.info(
-        "FAST TIMING: rapid_batch=%.0fms total=%.0fms gemini_calls=1 emails=%d",
+        "FAST TIMING: rapid_batch=%.0fms total=%.0fms revision_attempts=%d emails=%d score=%d",
         rapid_ms,
         timings.total_ms,
+        revision_attempts,
         len(assets),
+        critique.score,
         extra={"request_id": request_id},
     )
 
@@ -730,11 +829,11 @@ def orchestrate_campaign_fast(
         status=CampaignStatus.COMPLETED,
         blueprint=None,
         assets=assets,
-        critique=None,
+        critique=critique,
         metadata=ResponseMetadata(
             request_id=request_id,
             model_used=client._model,
-            tokens_estimate=0,
+            tokens_estimate=total_tokens + revision_attempts,
             timings=timings,
         ),
     )

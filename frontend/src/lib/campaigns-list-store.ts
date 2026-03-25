@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { GeneratedEmail } from "./api";
+import type { AiReport } from "./api";
 
 export type CampaignStatus = "draft" | "in_review" | "approved" | "sent";
 
@@ -19,6 +20,7 @@ export interface SavedCampaign {
   emails: GeneratedEmail[];
   approvals: Record<string, ApprovalState>;
   emailAssignments: Record<string, string[]>;
+  aiReport?: AiReport | null;
 }
 
 interface CampaignsListState {

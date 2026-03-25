@@ -436,8 +436,17 @@ export default function CampaignDetailPage() {
       campaign.approvals[e.id]?.legal && campaign.approvals[e.id]?.marketing
   ).length;
   const allApproved = approvedCount === campaign.emails.length;
+  const guardrailsPassed = campaign.aiReport?.guardrails_passed ?? true;
 
   const handleGoToSend = () => {
+    if (!guardrailsPassed) {
+      toast({
+        title: "Guardrails failed",
+        description: "Resolve AI risk flags before sending this campaign.",
+        variant: "destructive",
+      });
+      return;
+    }
     reset();
     setGeneratedEmails(campaign.emails);
     navigate("/send", { state: { campaignId: campaign.id } });
@@ -497,6 +506,13 @@ export default function CampaignDetailPage() {
             an email to review
           </span>
         </div>
+        {campaign.aiReport ? (
+          <div className="rounded-lg border border-border bg-card px-4 py-3 text-xs text-muted-foreground">
+            Score <span className="font-medium text-foreground">{campaign.aiReport.quality_score ?? "n/a"}</span>
+            {" · "}Tokens <span className="font-medium text-foreground">{campaign.aiReport.tokens_estimate}</span>
+            {" · "}Latency <span className="font-medium text-foreground">{campaign.aiReport.timings_ms?.total_ms ?? "n/a"} ms</span>
+          </div>
+        ) : null}
       </motion.div>
 
       {/* Email grid */}
@@ -528,6 +544,22 @@ export default function CampaignDetailPage() {
         </motion.div>
       )}
 
+      {!guardrailsPassed && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="flex items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-5 py-4"
+        >
+          <XCircle className="h-4 w-4 text-destructive shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-destructive">AI Guardrail Block</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Fix the risky copy in review before this campaign can be sent.
+            </p>
+          </div>
+        </motion.div>
+      )}
+
       {/* Approved → go to send */}
       {allApproved && campaign.status !== "sent" && (
         <motion.div
@@ -546,6 +578,7 @@ export default function CampaignDetailPage() {
             size="lg"
             className="h-10 px-6 text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 shrink-0"
             onClick={handleGoToSend}
+            disabled={!guardrailsPassed}
           >
             <Mail className="h-4 w-4" />
             Send Campaign

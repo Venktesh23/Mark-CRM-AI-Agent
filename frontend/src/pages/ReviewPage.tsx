@@ -202,7 +202,7 @@ export function EmailEditorModal({
 
 export default function ReviewPage() {
   const navigate = useNavigate();
-  const { generatedEmails, prompt, setStep, updateEmailHtml } = useCampaignStore();
+  const { generatedEmails, prompt, generationReport, setStep, updateEmailHtml } = useCampaignStore();
   const { addCampaign } = useCampaignsStore();
   const [selectedEmail, setSelectedEmail] = useState<GeneratedEmail | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -221,6 +221,14 @@ export default function ReviewPage() {
   if (!hasGeneratedEmails) return null;
 
   const handleSave = () => {
+    if (generationReport && !generationReport.guardrails_passed) {
+      toast({
+        title: "Guardrails failed",
+        description: "Fix risky content before saving this campaign.",
+        variant: "destructive",
+      });
+      return;
+    }
     setIsSaving(true);
     const id = crypto.randomUUID();
     // Derive a campaign name from the first ~60 chars of the prompt
@@ -236,6 +244,7 @@ export default function ReviewPage() {
       emails: generatedEmails,
       approvals: {},
       emailAssignments: {},
+      aiReport: generationReport,
     });
     setStep(1);
     navigate(`/campaigns/${id}`);
@@ -268,6 +277,36 @@ export default function ReviewPage() {
         ))}
       </div>
 
+      {generationReport ? (
+        <Card className="border-border">
+          <CardHeader>
+            <CardTitle className="text-sm">AI Quality Dashboard</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-xs text-muted-foreground">
+            <p>
+              Score: <span className="text-foreground font-medium">{generationReport.quality_score ?? "n/a"}</span>
+              {" · "}Tokens: <span className="text-foreground font-medium">{generationReport.tokens_estimate}</span>
+              {" · "}Model: <span className="text-foreground font-medium">{generationReport.model_used || "n/a"}</span>
+            </p>
+            <p>
+              Total latency:{" "}
+              <span className="text-foreground font-medium">
+                {generationReport.timings_ms?.total_ms ?? "n/a"} ms
+              </span>
+            </p>
+            {generationReport.risk_flags.length > 0 ? (
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-destructive">
+                {generationReport.risk_flags.slice(0, 3).map((flag) => (
+                  <p key={flag}>{flag}</p>
+                ))}
+              </div>
+            ) : (
+              <p className="text-emerald-600">Guardrails passed.</p>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
+
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -278,7 +317,7 @@ export default function ReviewPage() {
           size="lg"
           className="h-11 px-8 text-sm font-semibold rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
           onClick={handleSave}
-          disabled={isSaving}
+          disabled={isSaving || (generationReport ? !generationReport.guardrails_passed : false)}
         >
           {isSaving ? (
             <>

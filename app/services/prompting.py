@@ -714,7 +714,11 @@ PARSE_SCHEMA: dict = {
 }
 
 
-def build_parse_prompt(user_prompt: str, force_proceed: bool = False) -> str:
+def build_parse_prompt(
+    user_prompt: str,
+    force_proceed: bool = False,
+    campaign_memory: list[str] | None = None,
+) -> str:
     """
     Phase 0 – parse a free-form user prompt into a structured CampaignRequest.
 
@@ -731,6 +735,15 @@ Always set needs_clarification=false and return a fully populated campaign objec
         if force_proceed
         else ""
     )
+    memory = [m.strip() for m in (campaign_memory or []) if m and m.strip()]
+    memory_block = ""
+    if memory:
+        joined = "\n".join(f"- {item}" for item in memory[:5])
+        memory_block = (
+            "\nRECENT HIGH-PERFORMING CAMPAIGN MEMORY (use as style guidance, not hard facts):\n"
+            f"{joined}\n"
+        )
+
     return f"""\
 A user wants to generate a marketing email campaign. They described it in free text below.{force_instruction}
 
@@ -755,6 +768,7 @@ Non-critical fields (use sensible defaults if missing):
 
 USER PROMPT:
 \"\"\"{user_prompt}\"\"\"
+{memory_block}
 
 Return JSON matching the schema exactly. For campaign fields you cannot determine, \
 omit them (do not guess wildly). For discount_ceiling, only include if a specific \
@@ -787,7 +801,8 @@ RAPID_BATCH_SCHEMA: dict = {
                     "subject_lines": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "minItems": 2,
+                        "minItems": 3,
+                        "maxItems": 5,
                     },
                     "preview_text_options": {
                         "type": "array",
@@ -835,7 +850,11 @@ RAPID_BATCH_SCHEMA: dict = {
 }
 
 
-def build_rapid_batch_prompt(req: CampaignRequest) -> str:
+def build_rapid_batch_prompt(
+    req: CampaignRequest,
+    campaign_memory: list[str] | None = None,
+    revision_notes: list[str] | None = None,
+) -> str:
     """
     Single-call prompt that replaces phases 2-6.
     Gemini returns structured content fields; Python stitches them into HTML.
@@ -860,6 +879,24 @@ def build_rapid_batch_prompt(req: CampaignRequest) -> str:
     logo_url = brand.design_tokens.logo_url if brand.design_tokens else None
     legal_footer = brand.legal_footer or ""
     _footer_rule = ("\n- The footer_line must include the legal text: " + legal_footer) if legal_footer else ""
+    memory_lines = [m.strip() for m in (campaign_memory or []) if m and m.strip()]
+    revision_lines = [r.strip() for r in (revision_notes or []) if r and r.strip()]
+    memory_block = ""
+    if memory_lines:
+        memory_block = (
+            "\nCAMPAIGN MEMORY (from previous successful campaigns)\n"
+            "=====================================================\n"
+            + "\n".join(f"- {line}" for line in memory_lines[:5])
+            + "\n"
+        )
+    revision_block = ""
+    if revision_lines:
+        revision_block = (
+            "\nREVISION INSTRUCTIONS (must address every line below)\n"
+            "======================================================\n"
+            + "\n".join(f"- {line}" for line in revision_lines[:12])
+            + "\n"
+        )
 
     return f"""\
 You are a senior email marketing strategist and award-winning copywriter.
@@ -883,6 +920,8 @@ Language:         {obj.language or "en"}
 Channels:         {channels}
 Send window:      {send_window}
 Number of emails: {n_emails}
+{memory_block}
+{revision_block}
 
 TASK
 ====
@@ -900,7 +939,7 @@ PERSONALISATION RULES
 For each email return ALL of the following fields:
 - email_number     integer, starting at 1
 - email_name       descriptive label, e.g. "Teaser – Day 1"
-- subject_lines    2 A/B variants, 40–60 chars each (emoji allowed if brand-appropriate)
+- subject_lines    3-5 optimized options, 35–60 chars each (emoji allowed if brand-appropriate)
 - preview_text_options  2 variants, 80–100 chars each, complementing the subject
 - ctas             1–2 action phrases for the CTA button(s)
 - send_timing      recommended send day/time with a 1-line rationale
