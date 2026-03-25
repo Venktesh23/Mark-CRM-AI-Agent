@@ -12,7 +12,6 @@ import { fetchCrmData, getHubspotAuthUrl, refreshCrmData } from "@/features/inte
 import { DEMO_CRM_DATA } from "@/features/demo/demo-data";
 import { getUserErrorMessage } from "@/core/errors/user-message";
 import { setLocalOnlyMode } from "@/core/settings/runtime-settings";
-import markLogo from "@/assets/mark-logo.png";
 
 export default function Index() {
   const navigate = useNavigate();
@@ -104,7 +103,7 @@ export default function Index() {
         className="text-center space-y-6"
       >
         <motion.img
-          src={markLogo}
+          src="/mark-logo.png"
           alt="Mark"
           className="mx-auto h-16 w-16"
           initial={{ opacity: 0, scale: 0.8 }}

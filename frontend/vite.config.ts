@@ -5,6 +5,8 @@ import { componentTagger } from "lovable-tagger";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
+  // Serve shared root assets (../assets) as Vite public files.
+  publicDir: "../assets",
   server: {
     host: "::",
     // Keep 8080 free: HubSpot OAuth UI probes localhost:8080/servers.

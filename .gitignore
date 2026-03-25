@@ -2,6 +2,9 @@
 .env
 .env.*
 !.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
 
 # Python
 __pycache__/
@@ -31,7 +34,6 @@ sdist/
 node_modules/
 frontend/node_modules/
 frontend/dist/
-dist/
 dist-ssr/
 *.tsbuildinfo
 playwright-report/

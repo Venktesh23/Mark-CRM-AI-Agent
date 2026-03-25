@@ -3,7 +3,6 @@ import { useLocation } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
 import { useHubSpotStore } from "@/lib/hubspot-store";
 import { useCloudAuthStore } from "@/integrations/supabase/cloud-auth-store";
-import markLogo from "@/assets/mark-logo.png";
 import { LayoutList, PlusCircle, Palette, Plug, CheckCircle2, Settings, Menu, X } from "lucide-react";
 
 function SidebarSection({ label }: { label: string }) {
@@ -92,7 +91,7 @@ export function AppLayout({ children }: AppLayoutProps) {
           style={{ background: "linear-gradient(135deg, #683c19, #3f240f)" }}
         >
           <div className="flex items-center gap-2.5">
-            <img src={markLogo} alt="Mark" className="h-7 w-7" />
+            <img src="/mark-logo.png" alt="Mark" className="h-7 w-7" />
             <div className="leading-none">
               <p className="text-[15px] font-display font-bold text-white tracking-tight">Mark</p>
               <p className="text-[10px] text-white/50 font-mono-display mt-0.5">AI Campaign Agent</p>

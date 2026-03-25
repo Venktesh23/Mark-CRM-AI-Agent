@@ -2,7 +2,6 @@ import { Navigate, useNavigate } from "react-router-dom";
 import { ArrowRight, CheckCircle2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import markLogo from "@/assets/mark-logo.png";
 import { useCloudAuthStore } from "@/integrations/supabase/cloud-auth-store";
 
 export default function LandingPage() {
@@ -64,7 +63,7 @@ export default function LandingPage() {
           <Card className="border-border bg-card/80 backdrop-blur">
             <CardContent className="p-9 space-y-6">
               <div className="flex items-center gap-3.5">
-                <img src={markLogo} alt="Mark" className="h-11 w-11" />
+                <img src="/mark-logo.png" alt="Mark" className="h-11 w-11" />
                 <div>
                   <p className="text-xl font-semibold">Mark Workspace</p>
                   <p className="text-base text-muted-foreground">
