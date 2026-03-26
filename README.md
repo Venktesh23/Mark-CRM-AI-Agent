@@ -78,11 +78,15 @@ Set values based on the mode you want:
 - Required for cloud auth + cloud persistence:
   - `VITE_SUPABASE_URL`
   - `VITE_SUPABASE_ANON_KEY`
+  - `VITE_HUBSPOT_BASE_URL` (frontend -> HubSpot bridge URL)
+  - `VITE_API_BASE_URL` (frontend -> backend API URL, optional in local)
   - `SUPABASE_URL`
   - `SUPABASE_ANON_KEY`
 - Optional but recommended:
   - `SENDGRID_API_KEY`, `EMAIL_FROM`, `EMAIL_REPLY_TO`
   - `CLIENT_ID`, `CLIENT_SECRET` (HubSpot OAuth app)
+  - `HUBSPOT_REDIRECT_URI` (defaults to local callback)
+  - `CORS_ALLOWED_ORIGINS` (comma-separated frontend origins)
 
 ### 3) Run the app (3 terminals)
 
@@ -134,6 +138,35 @@ cd frontend && npm run lint && npm run test && npm run build
 cd frontend && npx playwright install chromium && npm run test:e2e
 ```
 
+## Deploy (Vercel + Hosted APIs)
+
+Recommended production topology:
+
+- Frontend: Vercel
+- Backend API (`app/`): Render/Railway/Fly
+- HubSpot bridge (`hubspotserver/`): Render/Railway/Fly (separate service)
+
+Set runtime variables:
+
+- Frontend (Vercel):
+  - `VITE_SUPABASE_URL`
+  - `VITE_SUPABASE_ANON_KEY`
+  - `VITE_HUBSPOT_BASE_URL=https://<hubspot-bridge-domain>`
+  - `VITE_API_BASE_URL=https://<backend-domain>`
+- Backend:
+  - `GEMINI_API_KEY`
+  - `SUPABASE_URL`
+  - `SUPABASE_ANON_KEY`
+  - `CORS_ALLOWED_ORIGINS=https://<frontend-domain>`
+  - optional: `SENDGRID_API_KEY`, `EMAIL_FROM`, `EMAIL_REPLY_TO`
+- HubSpot bridge:
+  - `CLIENT_ID`
+  - `CLIENT_SECRET`
+  - `FRONTEND_URL=https://<frontend-domain>`
+  - `HUBSPOT_REDIRECT_URI=https://<hubspot-bridge-domain>/oauth/callback`
+
+HubSpot app settings must include the same redirect URL as `HUBSPOT_REDIRECT_URI`.
+
 ## Runbook Commands
 
 Backend:
@@ -166,7 +199,7 @@ brew install uv
 
 In HubSpot app settings, add:
 
-`http://localhost:3000/oauth/callback`
+`HUBSPOT_REDIRECT_URI` value (local default: `http://localhost:3000/oauth/callback`)
 
 Then ensure same app `CLIENT_ID`/`CLIENT_SECRET` are in `.env`.
 

@@ -1,6 +1,7 @@
 import type { CrmData } from "@/lib/crm-parser";
 
-export const HUBSPOT_BASE_URL = "http://localhost:3000";
+const configuredHubspotBaseUrl = (import.meta.env.VITE_HUBSPOT_BASE_URL ?? "").trim();
+export const HUBSPOT_BASE_URL = configuredHubspotBaseUrl || "http://localhost:3000";
 
 export function getHubspotAuthUrl(): string {
   return `${HUBSPOT_BASE_URL}/auth/hubspot`;

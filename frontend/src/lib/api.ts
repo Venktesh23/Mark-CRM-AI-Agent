@@ -76,6 +76,15 @@ function isLocalOnlyMode(): boolean {
   return import.meta.env.VITE_LOCAL_ONLY === "true" || getLocalOnlyMode();
 }
 
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").trim().replace(/\/+$/, "");
+
+function resolveApiUrl(url: string): string {
+  if (!API_BASE_URL) return url;
+  if (/^https?:\/\//i.test(url)) return url;
+  if (url.startsWith("/")) return `${API_BASE_URL}${url}`;
+  return `${API_BASE_URL}/${url}`;
+}
+
 async function getAuthHeaders(): Promise<Record<string, string>> {
   if (!supabase || isLocalOnlyMode()) return {};
   const { data } = await supabase.auth.getSession();
@@ -90,7 +99,7 @@ async function fetchJsonOrThrow<T>(url: string, init?: RequestInit): Promise<T> 
     headers.set(key, value);
   });
 
-  const res = await fetch(url, { ...init, headers });
+  const res = await fetch(resolveApiUrl(url), { ...init, headers });
   if (!res.ok) {
     let detail = "";
     try {

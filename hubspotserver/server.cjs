@@ -11,12 +11,13 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
-const REDIRECT_URI = `http://localhost:${PORT}/oauth/callback`;
+const REDIRECT_URI = process.env.HUBSPOT_REDIRECT_URI || `http://localhost:${PORT}/oauth/callback`;
 const SCOPES = 'crm.objects.companies.read crm.objects.contacts.read oauth';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
 console.log('CLIENT_ID:', CLIENT_ID ? 'loaded' : 'missing');
 console.log('CLIENT_SECRET:', CLIENT_SECRET ? 'loaded' : 'missing');
+console.log('HUBSPOT_REDIRECT_URI:', REDIRECT_URI);
 
 // ── Persistence path ─────────────────────────────────────────────────────────
 const HUBSPOT_DATA_PATH =

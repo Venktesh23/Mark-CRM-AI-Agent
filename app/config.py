@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     # ── App ───────────────────────────────────────────────────────────────────
     app_name: str = "Mark – AI Campaign Generator"
     app_version: str = "1.0.0"
+    cors_allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     # ── Email / SendGrid ──────────────────────────────────────────────────────
     sendgrid_api_key: str = ""
     email_from: str = ""

@@ -42,7 +42,14 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+raw_origins = [item.strip() for item in settings.cors_allowed_origins.split(",") if item.strip()]
+allow_origins = ["*"] if "*" in raw_origins else raw_origins
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allow_origins or ["http://localhost:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.add_middleware(RequestIDMiddleware)
 
 app.include_router(health_router)
