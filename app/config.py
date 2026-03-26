@@ -34,7 +34,10 @@ class Settings(BaseSettings):
     email_reply_to: str = ""
     # ── Supabase auth / JWT verification ─────────────────────────────────────
     supabase_url: str = ""
+    supabase_anon_key: str = ""
     auth_required: bool = True
     auth_jwks_cache_seconds: int = 300
+    # ── Agent persistence store ───────────────────────────────────────────────
+    agent_store_path: str = "data/agent_store.db"
 
 settings = Settings()

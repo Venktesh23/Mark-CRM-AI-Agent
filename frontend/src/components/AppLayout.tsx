@@ -43,6 +43,88 @@ interface AppLayoutProps {
   children: React.ReactNode;
 }
 
+function SidebarContent({
+  hubspotConnected,
+  cloudUserEmail,
+  onSignOut,
+  onClose,
+  showCloseButton = false,
+}: {
+  hubspotConnected: boolean;
+  cloudUserEmail: string | null;
+  onSignOut: () => void;
+  onClose?: () => void;
+  showCloseButton?: boolean;
+}) {
+  return (
+    <>
+      <div
+        className="flex items-center justify-between gap-2.5 px-5 py-[18px] shrink-0"
+        style={{ background: "linear-gradient(135deg, #683c19, #3f240f)" }}
+      >
+        <div className="flex items-center gap-2.5">
+          <img src="/mark-logo.png" alt="Mark" className="h-7 w-7" />
+          <div className="leading-none">
+            <p className="text-[15px] font-display font-bold text-white tracking-tight">Mark</p>
+            <p className="text-[10px] text-white/50 font-mono-display mt-0.5">AI Campaign Agent</p>
+          </div>
+        </div>
+        {showCloseButton ? (
+          <button
+            onClick={onClose}
+            className="text-white/60 hover:text-white transition-colors p-1 rounded"
+            aria-label="Close menu"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        ) : null}
+      </div>
+
+      <nav className="flex-1 px-3 pb-3 overflow-y-auto">
+        <SidebarSection label="Workspace" />
+        <SidebarNavItem to="/campaigns" icon={<LayoutList className="h-4 w-4" />} label="Campaigns" />
+        <SidebarNavItem to="/create" icon={<PlusCircle className="h-4 w-4" />} label="Create" />
+
+        <SidebarSection label="Settings" />
+        <SidebarNavItem to="/brand" icon={<Palette className="h-4 w-4" />} label="Brand" />
+        <SidebarNavItem to="/settings" icon={<Settings className="h-4 w-4" />} label="Settings" />
+        <SidebarNavItem
+          to="/"
+          icon={<Plug className="h-4 w-4" />}
+          label="Integrations"
+          badge={
+            hubspotConnected
+              ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+              : <span className="h-2 w-2 rounded-full bg-amber-400 shrink-0" />
+          }
+        />
+      </nav>
+
+      <div className="p-3 border-t border-sidebar-border">
+        <div className="flex items-center gap-2 rounded-md bg-sidebar-accent/50 px-3 py-2.5">
+          <span className={`h-2 w-2 rounded-full shrink-0 ${hubspotConnected ? "bg-emerald-500" : "bg-sidebar-foreground/20"}`} />
+          <div className="min-w-0">
+            <p className="text-[11px] font-medium text-sidebar-foreground truncate">HubSpot CRM</p>
+            <p className="text-[10px] text-sidebar-foreground/50">{hubspotConnected ? "Connected" : "Not connected"}</p>
+          </div>
+        </div>
+        <div className="mt-2 flex items-center justify-between gap-2 px-1">
+          <p className="text-[10px] text-sidebar-foreground/40 truncate">
+            {cloudUserEmail ? `Cloud: ${cloudUserEmail}` : "Cloud signed in"}
+          </p>
+          <button
+            onClick={onSignOut}
+            className="text-[10px] px-2 py-1 rounded border border-sidebar-border text-sidebar-foreground/70 hover:text-sidebar-foreground"
+          >
+            Sign out
+          </button>
+        </div>
+        <p className="mt-2 px-1 text-[10px] text-sidebar-foreground/30 font-mono-display">Mark AI v1.0</p>
+      </div>
+    </>
+  );
+}
+
 export function AppLayout({ children }: AppLayoutProps) {
   const hubspotConnected = useHubSpotStore((s) => s.connected);
   const cloudSignOut = useCloudAuthStore((s) => s.signOut);
@@ -85,74 +167,13 @@ export function AppLayout({ children }: AppLayoutProps) {
           ${open ? "translate-x-0" : "-translate-x-full"}`}
         style={{ width: "14rem" }}
       >
-        {/* Logo area */}
-        <div
-          className="flex items-center justify-between gap-2.5 px-5 py-[18px] shrink-0"
-          style={{ background: "linear-gradient(135deg, #683c19, #3f240f)" }}
-        >
-          <div className="flex items-center gap-2.5">
-            <img src="/mark-logo.png" alt="Mark" className="h-7 w-7" />
-            <div className="leading-none">
-              <p className="text-[15px] font-display font-bold text-white tracking-tight">Mark</p>
-              <p className="text-[10px] text-white/50 font-mono-display mt-0.5">AI Campaign Agent</p>
-            </div>
-          </div>
-          <button
-            onClick={() => setOpen(false)}
-            className="text-white/60 hover:text-white transition-colors p-1 rounded"
-            aria-label="Close menu"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        {/* Nav links */}
-        <nav className="flex-1 px-3 pb-3 overflow-y-auto">
-          <SidebarSection label="Workspace" />
-          <SidebarNavItem to="/campaigns" icon={<LayoutList className="h-4 w-4" />} label="Campaigns" />
-          <SidebarNavItem to="/create" icon={<PlusCircle className="h-4 w-4" />} label="Create" />
-
-          <SidebarSection label="Settings" />
-          <SidebarNavItem to="/brand" icon={<Palette className="h-4 w-4" />} label="Brand" />
-          <SidebarNavItem to="/settings" icon={<Settings className="h-4 w-4" />} label="Settings" />
-          <SidebarNavItem
-            to="/"
-            icon={<Plug className="h-4 w-4" />}
-            label="Integrations"
-            badge={
-              hubspotConnected
-                ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                : <span className="h-2 w-2 rounded-full bg-amber-400 shrink-0" />
-            }
-          />
-        </nav>
-
-        {/* HubSpot status footer */}
-        <div className="p-3 border-t border-sidebar-border">
-          <div className="flex items-center gap-2 rounded-md bg-sidebar-accent/50 px-3 py-2.5">
-            <span className={`h-2 w-2 rounded-full shrink-0 ${hubspotConnected ? "bg-emerald-500" : "bg-sidebar-foreground/20"}`} />
-            <div className="min-w-0">
-              <p className="text-[11px] font-medium text-sidebar-foreground truncate">HubSpot CRM</p>
-              <p className="text-[10px] text-sidebar-foreground/50">{hubspotConnected ? "Connected" : "Not connected"}</p>
-            </div>
-          </div>
-          <div className="mt-2 flex items-center justify-between gap-2 px-1">
-            <p className="text-[10px] text-sidebar-foreground/40 truncate">
-              {cloudUser?.email
-                ? `Cloud: ${cloudUser.email}`
-                : "Cloud signed in"}
-            </p>
-            <button
-              onClick={() => {
-                void cloudSignOut();
-              }}
-              className="text-[10px] px-2 py-1 rounded border border-sidebar-border text-sidebar-foreground/70 hover:text-sidebar-foreground"
-            >
-              Sign out
-            </button>
-          </div>
-          <p className="mt-2 px-1 text-[10px] text-sidebar-foreground/30 font-mono-display">Mark AI v1.0</p>
-        </div>
+        <SidebarContent
+          hubspotConnected={hubspotConnected}
+          cloudUserEmail={cloudUser?.email ?? null}
+          showCloseButton
+          onClose={() => setOpen(false)}
+          onSignOut={() => { void cloudSignOut(); }}
+        />
       </div>
 
       {/* Menu trigger button */}

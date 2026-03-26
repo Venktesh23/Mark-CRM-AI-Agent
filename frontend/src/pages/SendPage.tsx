@@ -20,6 +20,7 @@ import {
   optimizeSendTimes,
   predictVariants,
   recordOutcome,
+  recordExperimentSample,
   startExperiment,
   runComplianceAssistant,
   sendCampaign,
@@ -184,7 +185,18 @@ export default function SendPage() {
   const [complianceBlockingIssues, setComplianceBlockingIssues] = useState<string[]>([]);
   const [performanceCopilot, setPerformanceCopilot] = useState<PerformanceCopilotResponse | null>(null);
   const [orchestration, setOrchestration] = useState<OrchestrateGrowthResponse | null>(null);
-  const [startedExperiments, setStartedExperiments] = useState<Array<{ emailId: string; experimentId: string }>>([]);
+  const [startedExperiments, setStartedExperiments] = useState<Array<{
+    emailId: string;
+    experimentId: string;
+    variants: string[];
+    winner?: string;
+    confidence?: number;
+  }>>([]);
+  const [experimentSamples, setExperimentSamples] = useState<
+    Record<string, Record<string, { impressions: string; clicks: string; conversions: string }>>
+  >({});
+  const [recordingExperiments, setRecordingExperiments] = useState(false);
+  const [experimentsRecorded, setExperimentsRecorded] = useState(false);
   const [observedOpenRate, setObservedOpenRate] = useState("");
   const [observedClickRate, setObservedClickRate] = useState("");
   const [observedConversionRate, setObservedConversionRate] = useState("");
@@ -442,6 +454,8 @@ export default function SendPage() {
     setPerformanceCopilot(null);
     setOrchestration(null);
     setStartedExperiments([]);
+    setExperimentSamples({});
+    setExperimentsRecorded(false);
     setOutcomesSaved(false);
     if (!campaignGuardrailsPassed) {
       toast({
@@ -602,7 +616,13 @@ export default function SendPage() {
       });
       setPerformanceCopilot(copilot);
 
-      const experiments: Array<{ emailId: string; experimentId: string }> = [];
+      const experiments: Array<{
+        emailId: string;
+        experimentId: string;
+        variants: string[];
+        winner?: string;
+        confidence?: number;
+      }> = [];
       for (const email of generatedEmails) {
         const options = subjectOptionsByEmail.get(email.id) ?? [];
         if (options.length < 2) continue;
@@ -612,12 +632,28 @@ export default function SendPage() {
             metric: "click_rate",
             variants: options.slice(0, 3),
           });
-          experiments.push({ emailId: email.id, experimentId: exp.experiment_id });
+          experiments.push({
+            emailId: email.id,
+            experimentId: exp.experiment_id,
+            variants: exp.variants.map((variant) => variant.variant),
+          });
         } catch {
           // Best-effort experiment tracking should not block send flow.
         }
       }
       setStartedExperiments(experiments);
+      const initialSamples: Record<string, Record<string, { impressions: string; clicks: string; conversions: string }>> = {};
+      for (const experiment of experiments) {
+        initialSamples[experiment.experimentId] = {};
+        for (const variant of experiment.variants) {
+          initialSamples[experiment.experimentId][variant] = {
+            impressions: "",
+            clicks: "",
+            conversions: "",
+          };
+        }
+      }
+      setExperimentSamples(initialSamples);
 
       if (failed.length > 0) {
         toast({
@@ -698,6 +734,86 @@ export default function SendPage() {
     }
   };
 
+  const updateExperimentSampleField = (
+    experimentId: string,
+    variant: string,
+    field: "impressions" | "clicks" | "conversions",
+    value: string
+  ) => {
+    setExperimentSamples((prev) => ({
+      ...prev,
+      [experimentId]: {
+        ...(prev[experimentId] ?? {}),
+        [variant]: {
+          impressions: prev[experimentId]?.[variant]?.impressions ?? "",
+          clicks: prev[experimentId]?.[variant]?.clicks ?? "",
+          conversions: prev[experimentId]?.[variant]?.conversions ?? "",
+          [field]: value,
+        },
+      },
+    }));
+  };
+
+  const handleRecordExperimentResults = async () => {
+    if (!startedExperiments.length) return;
+    const parseIntSafe = (value: string): number => {
+      const n = Number.parseInt(value.trim(), 10);
+      if (!Number.isFinite(n) || n < 0) return 0;
+      return n;
+    };
+    setRecordingExperiments(true);
+    try {
+      const updated = [...startedExperiments];
+      let anyRecorded = false;
+      for (const experiment of updated) {
+        const variants = experimentSamples[experiment.experimentId] ?? {};
+        let latestWinner = experiment.winner ?? "";
+        let latestConfidence = experiment.confidence ?? 0;
+        for (const variantName of experiment.variants) {
+          const sample = variants[variantName] ?? { impressions: "", clicks: "", conversions: "" };
+          const impressions = parseIntSafe(sample.impressions);
+          const clicks = parseIntSafe(sample.clicks);
+          const conversions = parseIntSafe(sample.conversions);
+          if (impressions <= 0 && clicks <= 0 && conversions <= 0) continue;
+          const status = await recordExperimentSample({
+            experiment_id: experiment.experimentId,
+            variant: variantName,
+            impressions,
+            clicks,
+            conversions,
+          });
+          latestWinner = status.winner || latestWinner;
+          latestConfidence = status.confidence ?? latestConfidence;
+          anyRecorded = true;
+        }
+        experiment.winner = latestWinner;
+        experiment.confidence = latestConfidence;
+      }
+      setStartedExperiments(updated);
+      if (!anyRecorded) {
+        toast({
+          title: "No experiment metrics entered",
+          description: "Add impressions/clicks/conversions for at least one variant first.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setExperimentsRecorded(true);
+      toast({
+        title: "Experiment metrics recorded",
+        description: "Winners and confidence are now updated from real engagement data.",
+      });
+    } catch (err) {
+      toast({
+        title: "Could not record experiment metrics",
+        description: getUserErrorMessage(err, "Please retry after entering valid variant metrics."),
+        variant: "destructive",
+      });
+    } finally {
+      setRecordingExperiments(false);
+    }
+  };
+
   if (sent) {
     return (
       <div className="flex flex-col items-center justify-center py-24 space-y-6">
@@ -766,21 +882,60 @@ export default function SendPage() {
           </div>
         )}
         {startedExperiments.length > 0 && (
-          <div className="w-full max-w-2xl rounded-lg border border-border bg-card p-4 space-y-2">
+          <div className="w-full max-w-2xl rounded-lg border border-border bg-card p-4 space-y-3">
             <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
               <TrendingUp className="h-4 w-4 text-primary" />
               Experimentation Tracking
             </div>
             <p className="text-xs text-muted-foreground">
-              Experiments were started without synthetic samples. Record real engagement events to determine winners.
+              Record real variant metrics below to determine winners. No synthetic samples are used.
             </p>
-            <ul className="text-xs text-foreground space-y-1 list-disc pl-4">
-              {startedExperiments.map(({ emailId, experimentId }) => (
-                <li key={emailId}>
-                  {emailId}: {experimentId}
-                </li>
+            <div className="space-y-3">
+              {startedExperiments.map((experiment) => (
+                <div key={experiment.experimentId} className="rounded-md border border-border p-3 space-y-2">
+                  <p className="text-xs font-medium text-foreground">
+                    {experiment.emailId} ({experiment.experimentId})
+                  </p>
+                  {experiment.winner ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      Winner: <span className="text-foreground font-medium">{experiment.winner}</span>
+                      {" · "}Confidence: <span className="text-foreground font-medium">{experiment.confidence ?? 0}%</span>
+                    </p>
+                  ) : null}
+                  <div className="space-y-2">
+                    {experiment.variants.map((variant) => (
+                      <div key={`${experiment.experimentId}-${variant}`} className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                        <Input value={variant} readOnly className="text-xs" />
+                        <Input
+                          inputMode="numeric"
+                          placeholder="Impressions"
+                          value={experimentSamples[experiment.experimentId]?.[variant]?.impressions ?? ""}
+                          onChange={(e) => updateExperimentSampleField(experiment.experimentId, variant, "impressions", e.target.value)}
+                          className="text-xs"
+                        />
+                        <Input
+                          inputMode="numeric"
+                          placeholder="Clicks"
+                          value={experimentSamples[experiment.experimentId]?.[variant]?.clicks ?? ""}
+                          onChange={(e) => updateExperimentSampleField(experiment.experimentId, variant, "clicks", e.target.value)}
+                          className="text-xs"
+                        />
+                        <Input
+                          inputMode="numeric"
+                          placeholder="Conversions"
+                          value={experimentSamples[experiment.experimentId]?.[variant]?.conversions ?? ""}
+                          onChange={(e) => updateExperimentSampleField(experiment.experimentId, variant, "conversions", e.target.value)}
+                          className="text-xs"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
               ))}
-            </ul>
+            </div>
+            <Button variant="outline" onClick={handleRecordExperimentResults} disabled={recordingExperiments || experimentsRecorded}>
+              {experimentsRecorded ? "Experiment Metrics Recorded" : recordingExperiments ? "Recording..." : "Record Experiment Metrics"}
+            </Button>
           </div>
         )}
         <div className="w-full max-w-2xl rounded-lg border border-border bg-card p-4 space-y-3">

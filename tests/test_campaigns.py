@@ -704,6 +704,7 @@ class TestGrowthUpgrades:
         assert rec_b.json()["completed"] is True
 
     def test_orchestrate_growth_loop_returns_compound_insights(self, client):
+        app.dependency_overrides[get_optional_gemini_client] = lambda: None
         client.post(
             "/v1/campaigns/record-outcome",
             json={

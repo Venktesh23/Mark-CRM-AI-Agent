@@ -346,9 +346,9 @@ export default function ReviewPage() {
               </span>
             </p>
             {generationReport.risk_flags.length > 0 ? (
-              <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-destructive">
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-destructive space-y-3">
                 {generationReport.risk_flags.slice(0, 3).map((flag) => (
-                  <p key={flag}>{flag}</p>
+                  <p key={flag} className="leading-relaxed">{flag}</p>
                 ))}
               </div>
             ) : (

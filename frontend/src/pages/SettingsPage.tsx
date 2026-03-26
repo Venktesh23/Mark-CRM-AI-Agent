@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -16,6 +17,7 @@ import { getAgentMetrics, type AgentMetricItem } from "@/lib/api";
 
 export default function SettingsPage() {
   const navigate = useNavigate();
+  const { resolvedTheme, setTheme } = useTheme();
   const sessionTimeoutMs = useAuthStore((s) => s.sessionTimeoutMs);
   const setSessionTimeoutMs = useAuthStore((s) => s.setSessionTimeoutMs);
   const [localOnly, setLocalOnly] = useState(getLocalOnlyMode());
@@ -30,6 +32,7 @@ export default function SettingsPage() {
   const [loadingMetrics, setLoadingMetrics] = useState(false);
 
   const timeoutValue = useMemo(() => Number(timeoutMinutes), [timeoutMinutes]);
+  const darkModeEnabled = resolvedTheme === "dark";
 
   const saveTimeout = () => {
     if (!Number.isFinite(timeoutValue) || timeoutValue < 1) {
@@ -103,6 +106,26 @@ export default function SettingsPage() {
           Manage local development options and reset data quickly.
         </p>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Appearance</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between rounded-lg border px-4 py-3">
+            <div>
+              <p className="text-sm font-medium">Dark mode</p>
+              <p className="text-xs text-muted-foreground">
+                Use a darker theme that is easier on the eyes.
+              </p>
+            </div>
+            <Switch
+              checked={darkModeEnabled}
+              onCheckedChange={(enabled) => setTheme(enabled ? "dark" : "light")}
+            />
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

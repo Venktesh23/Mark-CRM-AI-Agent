@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 _bearer = HTTPBearer(auto_error=False)
 _jwks_lock = threading.Lock()
 _jwks_cache: dict[str, Any] = {"expires_at": 0.0, "jwks": None}
+_ALLOWED_JWT_ALGORITHMS = {"ES256", "RS256"}
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class AuthenticatedUser:
     email: str | None
     role: str | None
     claims: dict[str, Any]
+    access_token: str | None = None
 
 
 def _jwt_issuer() -> str:
@@ -95,6 +97,13 @@ def _decode_access_token(token: str) -> dict[str, Any]:
             detail="Invalid authentication token.",
         ) from exc
 
+    alg = str(header.get("alg", "")).strip()
+    if alg not in _ALLOWED_JWT_ALGORITHMS:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication token.",
+        )
+
     kid = str(header.get("kid", "")).strip()
     if not kid:
         raise HTTPException(
@@ -109,7 +118,7 @@ def _decode_access_token(token: str) -> dict[str, Any]:
         claims = jwt.decode(
             token,
             public_key,
-            algorithms=["RS256"],
+            algorithms=[alg],
             issuer=_jwt_issuer(),
             options={"verify_aud": False},
         )
@@ -139,7 +148,7 @@ def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> AuthenticatedUser:
     if not settings.auth_required:
-        return AuthenticatedUser(user_id="dev-user", email=None, role="dev", claims={})
+        return AuthenticatedUser(user_id="dev-user", email=None, role="dev", claims={}, access_token=None)
 
     _require_supabase_config()
     if not credentials:
@@ -154,6 +163,7 @@ def get_current_user(
         email=claims.get("email"),
         role=claims.get("role"),
         claims=claims,
+        access_token=credentials.credentials,
     )
 
 
@@ -163,5 +173,6 @@ def require_authenticated_user(
 ) -> AuthenticatedUser:
     request.state.user_id = user.user_id
     request.state.user_email = user.email
+    request.state.access_token = user.access_token
     return user
 

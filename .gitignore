@@ -62,3 +62,4 @@ Thumbs.db
 logs/
 outputs/
 hubspot_data.json
+data/*.db

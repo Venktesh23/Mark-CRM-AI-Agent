@@ -30,3 +30,11 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 def disable_auth_for_backend_tests(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep existing unit tests focused on route behavior, not auth wiring."""
     monkeypatch.setattr("app.security.supabase_jwt.settings.auth_required", False)
+
+
+@pytest.fixture(autouse=True)
+def reset_agent_store_state() -> None:
+    """Keep agent persistence deterministic across tests."""
+    from app.services.agent_store import agent_store
+
+    agent_store.reset_for_tests()

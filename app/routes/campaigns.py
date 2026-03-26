@@ -55,7 +55,6 @@ from app.models import (
     RepurposeResponse,
     RepurposedAsset,
     OutcomeRecordRequest,
-    OutcomeRecord,
     OutcomeRecordResponse,
     MemoryRetrieveRequest,
     MemoryRetrieveResponse,
@@ -80,6 +79,7 @@ from app.security.supabase_jwt import require_authenticated_user
 from app.services.gemini_client import GeminiClient, get_gemini_client, get_optional_gemini_client
 from app.services.orchestrator import orchestrate_campaign, orchestrate_campaign_fast
 from app.services.cache import campaign_cache
+from app.services.agent_store import agent_store
 from app.services import prompting
 from app.services.validators import SPAM_TRIGGER_WORDS, validate_campaign_request
 
@@ -91,10 +91,7 @@ router = APIRouter(
     dependencies=[Depends(require_authenticated_user)],
 )
 
-_OUTCOME_HISTORY_BY_USER: dict[str, list[OutcomeRecord]] = {}
-_MAX_OUTCOME_HISTORY = 250
-_EXPERIMENTS_BY_USER: dict[str, dict[str, dict]] = {}
-_AGENT_METRICS_BY_USER: dict[str, dict[str, dict[str, float]]] = {}
+_MAX_OUTCOME_HISTORY = 500
 
 
 def _get_request_id(request: Request) -> str:
@@ -103,6 +100,13 @@ def _get_request_id(request: Request) -> str:
 
 def _get_user_id(request: Request) -> str:
     return str(getattr(request.state, "user_id", "dev-user"))
+
+
+def _get_access_token(request: Request) -> str | None:
+    raw = getattr(request.state, "access_token", None)
+    if not raw:
+        return None
+    return str(raw)
 
 
 def _extract_html_from_text(raw: str) -> str:
@@ -655,9 +659,14 @@ def _score_outcome(record: OutcomeRecordRequest) -> int:
     return max(0, min(100, score))
 
 
-def _memory_tags(item: OutcomeRecord) -> list[str]:
+def _row_value(item: dict[str, str | int | float | None], key: str) -> str:
+    raw = item.get(key)
+    return str(raw) if raw is not None else ""
+
+
+def _memory_tags(item: dict[str, str | int | float | None]) -> list[str]:
     tags: list[str] = []
-    for raw in (item.audience, item.segment, item.language):
+    for raw in (_row_value(item, "audience"), _row_value(item, "segment"), _row_value(item, "language")):
         value = (raw or "").strip().lower()
         if not value:
             continue
@@ -665,11 +674,18 @@ def _memory_tags(item: OutcomeRecord) -> list[str]:
     return list(dict.fromkeys(tags))
 
 
-def _memory_match_score(item: OutcomeRecord, query: MemoryRetrieveRequest) -> int:
-    score = item.score
+def _memory_match_score(item: dict[str, str | int | float | None], query: MemoryRetrieveRequest) -> int:
+    score = int(item.get("score") or 0)
     query_blob = " ".join([query.prompt, query.audience, query.objective]).lower()
     item_blob = " ".join(
-        [item.prompt, item.audience, item.subject, item.segment, item.notes, item.language]
+        [
+            _row_value(item, "prompt"),
+            _row_value(item, "audience"),
+            _row_value(item, "subject"),
+            _row_value(item, "segment"),
+            _row_value(item, "notes"),
+            _row_value(item, "language"),
+        ]
     ).lower()
     for token in re.findall(r"[a-z0-9_]{3,}", query_blob):
         if token in item_blob:
@@ -677,18 +693,20 @@ def _memory_match_score(item: OutcomeRecord, query: MemoryRetrieveRequest) -> in
     return min(100, score)
 
 
-def _track_agent(user_id: str, agent: str, status: str, latency_ms: float = 0.0) -> None:
-    metrics = _AGENT_METRICS_BY_USER.setdefault(user_id, {})
-    bucket = metrics.setdefault(
-        agent,
-        {"calls": 0.0, "success": 0.0, "fallback": 0.0, "latency_total_ms": 0.0},
+def _track_agent(
+    user_id: str,
+    agent: str,
+    status: str,
+    latency_ms: float = 0.0,
+    access_token: str | None = None,
+) -> None:
+    agent_store.track_agent(
+        user_id=user_id,
+        agent=agent,
+        status=status,
+        latency_ms=latency_ms,
+        access_token=access_token,
     )
-    bucket["calls"] += 1
-    if status == "success":
-        bucket["success"] += 1
-    if status == "fallback":
-        bucket["fallback"] += 1
-    bucket["latency_total_ms"] += max(0.0, latency_ms)
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -1763,29 +1781,31 @@ async def record_outcome(
 ) -> OutcomeRecordResponse:
     request_id = _get_request_id(request)
     user_id = _get_user_id(request)
+    access_token = _get_access_token(request)
     logger.info("POST /record-outcome", extra={"request_id": request_id})
     score = _score_outcome(payload)
-    row = OutcomeRecord(
-        id=str(uuid.uuid4()),
-        campaign_name=payload.campaign_name,
-        prompt=payload.prompt,
-        audience=payload.audience,
-        subject=payload.subject,
-        cta=payload.cta,
-        open_rate=payload.open_rate,
-        click_rate=payload.click_rate,
-        conversion_rate=payload.conversion_rate,
-        language=payload.language,
-        segment=payload.segment,
-        notes=payload.notes,
-        score=score,
+    total_records = agent_store.record_outcome(
+        user_id=user_id,
+        row={
+            "id": str(uuid.uuid4()),
+            "campaign_name": payload.campaign_name,
+            "prompt": payload.prompt,
+            "audience": payload.audience,
+            "subject": payload.subject,
+            "cta": payload.cta,
+            "open_rate": payload.open_rate,
+            "click_rate": payload.click_rate,
+            "conversion_rate": payload.conversion_rate,
+            "language": payload.language,
+            "segment": payload.segment,
+            "notes": payload.notes,
+            "score": score,
+        },
+        max_history=_MAX_OUTCOME_HISTORY,
+        access_token=access_token,
     )
-    history = _OUTCOME_HISTORY_BY_USER.setdefault(user_id, [])
-    history.append(row)
-    if len(history) > _MAX_OUTCOME_HISTORY:
-        del history[:-_MAX_OUTCOME_HISTORY]
-    _track_agent(user_id, "closed_loop_learning", "success")
-    return OutcomeRecordResponse(stored=True, score=score, total_records=len(history))
+    _track_agent(user_id, "closed_loop_learning", "success", access_token=access_token)
+    return OutcomeRecordResponse(stored=True, score=score, total_records=total_records)
 
 
 @router.post(
@@ -1800,10 +1820,11 @@ async def retrieve_memory(
 ) -> MemoryRetrieveResponse:
     request_id = _get_request_id(request)
     user_id = _get_user_id(request)
+    access_token = _get_access_token(request)
     logger.info("POST /retrieve-memory", extra={"request_id": request_id})
-    history = _OUTCOME_HISTORY_BY_USER.get(user_id, [])
+    history = agent_store.list_outcomes(user_id, access_token=access_token)
     if not history:
-        _track_agent(user_id, "structured_memory", "fallback")
+        _track_agent(user_id, "structured_memory", "fallback", access_token=access_token)
         return MemoryRetrieveResponse(snippets=[], reasoning="No historical outcomes recorded yet.")
 
     ranked = sorted(
@@ -1815,15 +1836,15 @@ async def retrieve_memory(
     snippets = [
         MemorySnippet(
             snippet=(
-                f"{item.campaign_name or 'Campaign'} | audience={item.audience or 'general'} | "
-                f"subject='{item.subject}' | cta='{item.cta}' | score={item.score}"
+                f"{_row_value(item, 'campaign_name') or 'Campaign'} | audience={_row_value(item, 'audience') or 'general'} | "
+                f"subject='{_row_value(item, 'subject')}' | cta='{_row_value(item, 'cta')}' | score={int(item.get('score') or 0)}"
             ),
             score=_memory_match_score(item, payload),
             tags=_memory_tags(item),
         )
         for item in ranked
     ]
-    _track_agent(user_id, "structured_memory", "success")
+    _track_agent(user_id, "structured_memory", "success", access_token=access_token)
     return MemoryRetrieveResponse(
         snippets=snippets,
         reasoning=f"Returned top {len(snippets)} snippets ranked by outcome score and query relevance.",
@@ -1842,27 +1863,27 @@ async def start_experiment(
 ) -> ExperimentStartResponse:
     request_id = _get_request_id(request)
     user_id = _get_user_id(request)
+    access_token = _get_access_token(request)
     logger.info("POST /experiments/start", extra={"request_id": request_id})
     experiment_id = str(uuid.uuid4())
-    variants = {
-        variant.strip(): {"impressions": 0, "clicks": 0, "conversions": 0}
-        for variant in payload.variants
-        if variant.strip()
-    }
-    user_experiments = _EXPERIMENTS_BY_USER.setdefault(user_id, {})
-    user_experiments[experiment_id] = {
-        "id": experiment_id,
-        "name": payload.experiment_name,
-        "metric": payload.metric,
-        "variants": variants,
-    }
-    _track_agent(user_id, "ab_experimentation", "success")
+    cleaned_variants = [variant.strip() for variant in payload.variants if variant.strip()]
+    if len(cleaned_variants) < 2:
+        raise HTTPException(status_code=422, detail="At least two non-empty variants are required.")
+    agent_store.start_experiment(
+        user_id=user_id,
+        experiment_id=experiment_id,
+        name=payload.experiment_name,
+        metric=payload.metric,
+        variants=cleaned_variants,
+        access_token=access_token,
+    )
+    _track_agent(user_id, "ab_experimentation", "success", access_token=access_token)
     return ExperimentStartResponse(
         experiment_id=experiment_id,
         metric=payload.metric,
         variants=[
             ExperimentVariantStat(variant=key, impressions=0, clicks=0, conversions=0, rate=0.0)
-            for key in variants.keys()
+            for key in cleaned_variants
         ],
     )
 
@@ -1879,33 +1900,39 @@ async def record_experiment(
 ) -> ExperimentStatusResponse:
     request_id = _get_request_id(request)
     user_id = _get_user_id(request)
+    access_token = _get_access_token(request)
     logger.info("POST /experiments/record", extra={"request_id": request_id, "experiment_id": payload.experiment_id})
-    user_experiments = _EXPERIMENTS_BY_USER.get(user_id, {})
-    state = user_experiments.get(payload.experiment_id)
+    state = agent_store.record_experiment_sample(
+        user_id=user_id,
+        experiment_id=payload.experiment_id,
+        variant=payload.variant,
+        impressions=payload.impressions,
+        clicks=payload.clicks,
+        conversions=payload.conversions,
+        access_token=access_token,
+    )
     if state is None:
         raise HTTPException(status_code=404, detail="Experiment not found.")
-    if payload.variant not in state["variants"]:
+    if state.get("error") == "variant_not_found":
         raise HTTPException(status_code=422, detail="Variant not found in experiment.")
-
-    sample = state["variants"][payload.variant]
-    sample["impressions"] += payload.impressions
-    sample["clicks"] += payload.clicks
-    sample["conversions"] += payload.conversions
-
-    metric = state["metric"]
+    metric = str(state.get("metric", "click_rate"))
     stats: list[ExperimentVariantStat] = []
-    for variant, values in state["variants"].items():
-        denom = max(values["impressions"], 1)
+    for row in state.get("variants", []):
+        variant = str(row.get("variant", "")).strip()
+        impressions = int(row.get("impressions") or 0)
+        clicks = int(row.get("clicks") or 0)
+        conversions = int(row.get("conversions") or 0)
+        denom = max(impressions, 1)
         if metric == "conversion_rate":
-            rate = values["conversions"] / denom
+            rate = conversions / denom
         else:
-            rate = values["clicks"] / denom
+            rate = clicks / denom
         stats.append(
             ExperimentVariantStat(
                 variant=variant,
-                impressions=values["impressions"],
-                clicks=values["clicks"],
-                conversions=values["conversions"],
+                impressions=impressions,
+                clicks=clicks,
+                conversions=conversions,
                 rate=round(rate, 4),
             )
         )
@@ -1914,7 +1941,7 @@ async def record_experiment(
     total_impressions = sum(item.impressions for item in stats)
     confidence = min(95, int(total_impressions / 5))
     completed = total_impressions >= 200
-    _track_agent(user_id, "ab_experimentation", "success")
+    _track_agent(user_id, "ab_experimentation", "success", access_token=access_token)
     return ExperimentStatusResponse(
         experiment_id=payload.experiment_id,
         metric=metric,
@@ -1934,20 +1961,21 @@ async def record_experiment(
 async def get_agent_metrics(request: Request) -> AgentMetricsResponse:
     request_id = _get_request_id(request)
     user_id = _get_user_id(request)
+    access_token = _get_access_token(request)
     logger.info("GET /agent-metrics", extra={"request_id": request_id})
     items: list[AgentMetricItem] = []
     total_calls = 0
-    user_metrics = _AGENT_METRICS_BY_USER.get(user_id, {})
-    for agent, values in user_metrics.items():
-        calls = int(values.get("calls", 0))
+    for row in agent_store.get_agent_metrics(user_id, access_token=access_token):
+        agent = str(row.get("agent", ""))
+        calls = int(row.get("calls") or 0)
         total_calls += calls
-        avg_latency = (values.get("latency_total_ms", 0.0) / calls) if calls else 0.0
+        avg_latency = (float(row.get("latency_total_ms") or 0.0) / calls) if calls else 0.0
         items.append(
             AgentMetricItem(
                 agent=agent,
                 calls=calls,
-                success=int(values.get("success", 0)),
-                fallback=int(values.get("fallback", 0)),
+                success=int(row.get("success") or 0),
+                fallback=int(row.get("fallback") or 0),
                 avg_latency_ms=round(avg_latency, 1),
             )
         )
@@ -1968,6 +1996,7 @@ async def orchestrate_growth_loop(
 ) -> OrchestrateGrowthResponse:
     request_id = _get_request_id(request)
     user_id = _get_user_id(request)
+    access_token = _get_access_token(request)
     logger.info("POST /orchestrate-growth-loop", extra={"request_id": request_id})
     started = time.perf_counter()
     try:
@@ -2026,10 +2055,69 @@ async def orchestrate_growth_loop(
             "Record post-send outcomes to continuously improve memory retrieval quality.",
         ]
         if client is not None:
-            next_actions.append("Use AI copilot summary after send and feed recommendations into next brief.")
-            _track_agent(user_id, "cross_agent_orchestration", "success", (time.perf_counter() - started) * 1000)
+            try:
+                ai_result = client.generate_text(
+                    prompt=(
+                        "You are a growth orchestration copilot. Improve recommendations using this context:\n"
+                        f"- Campaign name: {payload.campaign_name}\n"
+                        f"- Prompt: {payload.prompt}\n"
+                        f"- Audience: {payload.audience}\n"
+                        f"- Objective: {payload.objective}\n"
+                        f"- Offer: {payload.offer}\n"
+                        f"- Current best subject: {best_subject}\n"
+                        f"- Current best cta: {best_cta}\n"
+                        f"- Compliance summary: {compliance.summary}\n"
+                        f"- Send-time reasoning: {send_reasoning}\n"
+                        f"- Memory snippets: {snippets}\n"
+                        "Return JSON with keys: improved_best_subject, improved_best_cta, next_actions (array), rationale."
+                    ),
+                    system_instruction=prompting.SHARED_SYSTEM_INSTRUCTION,
+                    json_schema={
+                        "type": "object",
+                        "properties": {
+                            "improved_best_subject": {"type": "string"},
+                            "improved_best_cta": {"type": "string"},
+                            "next_actions": {"type": "array", "items": {"type": "string"}},
+                            "rationale": {"type": "string"},
+                        },
+                        "required": ["improved_best_subject", "improved_best_cta", "next_actions", "rationale"],
+                        "additionalProperties": False,
+                    },
+                    temperature=0.2,
+                )
+                parsed = ai_result.get("parsed") or {}
+                improved_subject = str(parsed.get("improved_best_subject", "")).strip()
+                improved_cta = str(parsed.get("improved_best_cta", "")).strip()
+                ai_actions = [
+                    str(item).strip() for item in (parsed.get("next_actions") or []) if str(item).strip()
+                ]
+                rationale = str(parsed.get("rationale", "")).strip()
+                if improved_subject:
+                    best_subject = improved_subject
+                if improved_cta:
+                    best_cta = improved_cta
+                if ai_actions:
+                    next_actions = ai_actions[:5]
+                if rationale:
+                    send_reasoning = f"{send_reasoning} {rationale}".strip()
+            except Exception:
+                logger.exception("orchestrate-growth-loop AI synthesis failed; using deterministic output")
+                next_actions.append("Use AI copilot summary after send and feed recommendations into next brief.")
+            _track_agent(
+                user_id,
+                "cross_agent_orchestration",
+                "success",
+                (time.perf_counter() - started) * 1000,
+                access_token=access_token,
+            )
         else:
-            _track_agent(user_id, "cross_agent_orchestration", "fallback", (time.perf_counter() - started) * 1000)
+            _track_agent(
+                user_id,
+                "cross_agent_orchestration",
+                "fallback",
+                (time.perf_counter() - started) * 1000,
+                access_token=access_token,
+            )
 
         return OrchestrateGrowthResponse(
             best_subject=best_subject,
@@ -2042,7 +2130,13 @@ async def orchestrate_growth_loop(
         )
     except Exception:
         logger.exception("orchestrate-growth-loop failed")
-        _track_agent(user_id, "cross_agent_orchestration", "fallback", (time.perf_counter() - started) * 1000)
+        _track_agent(
+            user_id,
+            "cross_agent_orchestration",
+            "fallback",
+            (time.perf_counter() - started) * 1000,
+            access_token=access_token,
+        )
         return OrchestrateGrowthResponse(
             best_subject="",
             best_cta="",
