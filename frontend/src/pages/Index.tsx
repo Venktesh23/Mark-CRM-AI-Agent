@@ -112,12 +112,12 @@ export default function Index() {
         />
 
         <h1 className="text-5xl font-bold tracking-tight sm:text-6xl lg:text-7xl text-foreground leading-[1.05]">
-          Meet <span className="gradient-text">Mark</span>
+          <span className="gradient-text">Integrate</span> Your CRM
         </h1>
 
         <p className="mx-auto max-w-xl text-lg text-muted-foreground leading-relaxed">
-          Your AI-powered marketing campaign agent. Create multi-channel email campaigns,
-          review personalized content, and reach your audience — all from one place.
+          Integrations connect your business tools to Mark. Link your CRM to automatically access customer data,
+          populate campaigns with real contacts, and let AI generate personalized content across all your platforms.
         </p>
 
         <motion.div
@@ -154,15 +154,15 @@ export default function Index() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="flex flex-col items-center gap-4"
+              className="flex flex-col items-center gap-11"
             >
-              <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-6 py-4 dark:border-emerald-800 dark:bg-emerald-950">
-                <CheckCircle2 className="h-6 w-6 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <div className="flex items-center gap-3 rounded-xl px-6 py-4" style={{ backgroundColor: '#F0E8E0', border: '1px solid #E0D7CC' }}>
+                <CheckCircle2 className="h-6 w-6 text-emerald-600 dark:text-emerald-400 shrink-0" style={{ color: '#8B7355', }} />
                 <div className="text-left">
-                  <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-300">
+                  <p className="text-sm font-semibold" style={{ color: '#5D4E47' }}>
                     HubSpot configured{brandName ? ` · ${brandName}` : ""}
                   </p>
-                  <p className="text-xs text-emerald-600 dark:text-emerald-500 mt-0.5">
+                  <p className="text-xs mt-0.5" style={{ color: '#8B7355' }}>
                     {lastSyncedAt
                       ? `Last synced ${new Date(lastSyncedAt).toLocaleString()}`
                       : "CRM connected and brand data imported"}

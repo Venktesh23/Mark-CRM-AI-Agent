@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Save, RotateCcw, Palette, FileText, Shield, CheckCircle2, Plug, Copy } from "lucide-react";
+import { Save, RotateCcw, Palette, FileText, Shield, CheckCircle2, Plug, Copy, X, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,6 +13,17 @@ import { useCampaignsStore } from "@/lib/campaigns-list-store";
 import { trainBrandVoice } from "@/lib/api";
 import { HUBSPOT_DESCRIPTION_TEMPLATE } from "@/lib/crm-parser";
 import { toast } from "@/hooks/use-toast";
+
+// ── File upload helper ─────────────────────────────────────────────────────
+
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+  });
+};
 
 // ── Tag input for phrase lists ─────────────────────────────────────────────
 
@@ -87,15 +98,20 @@ function ColorInput({
   value,
   onChange,
   description,
+  required = false,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   description?: string;
+  required?: boolean;
 }) {
   return (
     <div className="space-y-1.5">
-      <label className="text-xs font-medium text-foreground">{label}</label>
+      <label className="text-xs font-medium text-foreground">
+        {label}
+        {required && <span className="text-destructive ml-1">*</span>}
+      </label>
       {description && (
         <p className="text-[11px] text-muted-foreground">{description}</p>
       )}
@@ -165,14 +181,19 @@ function Field({
   label,
   description,
   children,
+  required = false,
 }: {
   label: string;
   description?: string;
   children: React.ReactNode;
+  required?: boolean;
 }) {
   return (
     <div className="space-y-1.5">
-      <label className="text-xs font-medium text-foreground">{label}</label>
+      <label className="text-xs font-medium text-foreground">
+        {label}
+        {required && <span className="text-destructive ml-1">*</span>}
+      </label>
       {description && (
         <p className="text-[11px] text-muted-foreground">{description}</p>
       )}
@@ -196,8 +217,52 @@ export default function BrandPage() {
   const campaigns = useCampaignsStore((s) => s.campaigns);
   const [saved, setSaved] = useState(false);
   const [isTrainingVoice, setIsTrainingVoice] = useState(false);
+  const [showCrmBanner, setShowCrmBanner] = useState(true);
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  const validateRequiredFields = () => {
+    const errors: string[] = [];
+
+    if (!brand.brandName.trim()) {
+      errors.push("Brand Name is required");
+    }
+    if (!brand.voiceGuidelines.trim()) {
+      errors.push("Voice Guidelines is required");
+    }
+    if (!brand.designTokens.primaryColor.trim()) {
+      errors.push("Primary Color is required");
+    }
+    if (!brand.designTokens.secondaryColor.trim()) {
+      errors.push("Secondary Color is required");
+    }
+    if (!brand.designTokens.accentColor.trim()) {
+      errors.push("Accent Color is required");
+    }
+    if (!brand.designTokens.fontFamilyHeading.trim()) {
+      errors.push("Heading Font is required");
+    }
+    if (!brand.designTokens.fontFamilyBody.trim()) {
+      errors.push("Body Font is required");
+    }
+
+    return errors;
+  };
 
   const handleSave = () => {
+    const errors = validateRequiredFields();
+
+    if (errors.length > 0) {
+      const errorMessage = errors.join(", ");
+      setValidationError(errorMessage);
+      toast({
+        title: "Validation Error",
+        description: errorMessage,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setValidationError(null);
     setSaved(true);
     toast({ title: "Brand saved", description: "Your brand settings have been saved." });
     setTimeout(() => setSaved(false), 2000);
@@ -240,16 +305,29 @@ export default function BrandPage() {
   return (
     <div className="space-y-8">
       {/* HubSpot import banner */}
-      {importedFromCrm && (
+      {importedFromCrm && showCrmBanner && (
         <motion.div
           initial={{ opacity: 0, y: -8 }}
           animate={{ opacity: 1, y: 0 }}
-          className="flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+          className="flex items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm dark:border-[#6B5D54]"
+          style={{ backgroundColor: '#F0E8E0', border: '1px solid #E0D7CC', color: '#5D4E47' }}
         >
-          <Plug className="h-4 w-4 shrink-0 text-emerald-600" />
-          <span>
-            <strong>Imported from HubSpot CRM.</strong> Review the fields below — anything missing can be added manually or via your HubSpot company description.
-          </span>
+          <div className="flex items-center gap-3">
+            <Plug className="h-4 w-4 shrink-0" style={{ color: '#8B7355' }} />
+            <span>
+              <strong>Imported from HubSpot CRM.</strong> Review the fields below — anything missing can be added manually or via your HubSpot company description.
+            </span>
+          </div>
+          <button
+            onClick={() => setShowCrmBanner(false)}
+            className="shrink-0 transition-colors"
+            style={{ color: '#8B7355' }}
+            onMouseEnter={(e) => e.target.style.color = '#6B5D54'}
+            onMouseLeave={(e) => e.target.style.color = '#8B7355'}
+            aria-label="Close message"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </motion.div>
       )}
       {/* Page header */}
@@ -300,6 +378,11 @@ export default function BrandPage() {
       </motion.div>
 
       <Tabs defaultValue="identity">
+        <div className="mb-4 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span>Fields marked with</span>
+          <span className="text-destructive font-semibold">*</span>
+          <span>are required for the AI</span>
+        </div>
         <TabsList className="mb-6">
           <TabsTrigger value="identity" className="gap-1.5 text-xs">
             <FileText className="h-3.5 w-3.5" />
@@ -331,7 +414,7 @@ export default function BrandPage() {
               title="Brand Identity"
               description="Core brand information used to personalise every campaign."
             >
-              <Field label="Brand Name" description="The name that appears in all email copy and headers.">
+              <Field label="Brand Name" description="The name that appears in all email copy and headers." required>
                 <Input
                   value={brand.brandName}
                   onChange={(e) => updateBrand({ brandName: e.target.value })}
@@ -343,6 +426,7 @@ export default function BrandPage() {
               <Field
                 label="Voice Guidelines"
                 description="Describe your brand's tone, writing style, and communication principles."
+                required
               >
                 <Textarea
                   value={brand.voiceGuidelines}
@@ -427,6 +511,7 @@ export default function BrandPage() {
                     value={brand.designTokens.primaryColor}
                     onChange={(v) => updateDesignTokens({ primaryColor: v })}
                     description="Header, CTA button"
+                    required
                   />
                   <ColorInput
                     label="Secondary"
@@ -435,12 +520,14 @@ export default function BrandPage() {
                       updateDesignTokens({ secondaryColor: v })
                     }
                     description="Backgrounds"
+                    required
                   />
                   <ColorInput
                     label="Accent"
                     value={brand.designTokens.accentColor}
                     onChange={(v) => updateDesignTokens({ accentColor: v })}
                     description="Highlights"
+                    required
                   />
                 </div>
 
@@ -452,6 +539,7 @@ export default function BrandPage() {
                   <Field
                     label="Heading Font"
                     description="Used for h1–h3 in email templates."
+                    required
                   >
                     <Input
                       value={brand.designTokens.fontFamilyHeading}
@@ -465,6 +553,7 @@ export default function BrandPage() {
                   <Field
                     label="Body Font"
                     description="Used for paragraphs and body copy."
+                    required
                   >
                     <Input
                       value={brand.designTokens.fontFamilyBody}
@@ -472,6 +561,49 @@ export default function BrandPage() {
                         updateDesignTokens({ fontFamilyBody: e.target.value })
                       }
                       placeholder="Arial, sans-serif"
+                      className="text-sm font-mono-display"
+                    />
+                  </Field>
+                </div>
+
+                {/* Font sizing and spacing */}
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <Field
+                    label="Base Font Size"
+                    description="Default text size in emails."
+                  >
+                    <Input
+                      value={brand.designTokens.fontSizeBase}
+                      onChange={(e) =>
+                        updateDesignTokens({ fontSizeBase: e.target.value })
+                      }
+                      placeholder="16px"
+                      className="text-sm font-mono-display"
+                    />
+                  </Field>
+                  <Field
+                    label="Line Height"
+                    description="Space between lines of text."
+                  >
+                    <Input
+                      value={brand.designTokens.lineHeight}
+                      onChange={(e) =>
+                        updateDesignTokens({ lineHeight: e.target.value })
+                      }
+                      placeholder="1.6"
+                      className="text-sm font-mono-display"
+                    />
+                  </Field>
+                  <Field
+                    label="Spacing Unit"
+                    description="Base spacing increment for layouts."
+                  >
+                    <Input
+                      value={brand.designTokens.spacingUnit}
+                      onChange={(e) =>
+                        updateDesignTokens({ spacingUnit: e.target.value })
+                      }
+                      placeholder="8px"
                       className="text-sm font-mono-display"
                     />
                   </Field>
@@ -496,31 +628,193 @@ export default function BrandPage() {
                     label="Logo URL"
                     description="Publicly accessible URL for your logo image."
                   >
-                    <Input
-                      value={brand.designTokens.logoUrl}
-                      onChange={(e) =>
-                        updateDesignTokens({ logoUrl: e.target.value })
-                      }
-                      placeholder="https://example.com/logo.png"
-                      className="text-sm"
-                      type="url"
-                    />
+                    <div className="flex gap-2">
+                      <Input
+                        value={brand.designTokens.logoUrl}
+                        onChange={(e) =>
+                          updateDesignTokens({ logoUrl: e.target.value })
+                        }
+                        placeholder="https://example.com/logo.png"
+                        className="text-sm"
+                        type="url"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="text-xs h-10 shrink-0 gap-1.5"
+                        onClick={() => document.getElementById("logo-upload")?.click()}
+                      >
+                        <Upload className="h-3.5 w-3.5" />
+                        Upload
+                      </Button>
+                      <input
+                        id="logo-upload"
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            try {
+                              const base64 = await fileToBase64(file);
+                              updateDesignTokens({ logoUrl: base64 });
+                              toast({ title: "Logo uploaded", description: `${file.name} has been uploaded.` });
+                            } catch (error) {
+                              toast({ title: "Error", description: "Failed to upload logo.", variant: "destructive" });
+                            }
+                          }
+                        }}
+                      />
+                    </div>
                   </Field>
                 </div>
 
                 {/* Logo preview */}
                 {brand.designTokens.logoUrl && (
-                  <div className="rounded-lg border border-border bg-muted/30 p-4 flex items-center justify-center">
-                    <img
-                      src={brand.designTokens.logoUrl}
-                      alt="Logo preview"
-                      className="max-h-16 max-w-[200px] object-contain"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = "none";
-                      }}
-                    />
+                  <div className="rounded-lg border border-border overflow-hidden bg-muted/30">
+                    <div className="px-3 py-2 border-b border-border bg-muted/50 flex items-center gap-1.5">
+                      <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Logo Preview</span>
+                    </div>
+                    <div className="p-4 flex items-center justify-center">
+                      <img
+                        src={brand.designTokens.logoUrl}
+                        alt="Logo preview"
+                        className="max-h-20 max-w-[220px] object-contain"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = "none";
+                        }}
+                      />
+                    </div>
                   </div>
                 )}
+
+                {/* Email Banner */}
+                <div className="pt-2 border-t border-border/60 space-y-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Email Banner
+                  </p>
+                  <Field
+                    label="Banner Image URL"
+                    description="Full-width hero image shown at the top of every email preview. Use a 600px wide image for best results."
+                  >
+                    <div className="flex gap-2">
+                      <Input
+                        value={brand.designTokens.bannerUrl}
+                        onChange={(e) => updateDesignTokens({ bannerUrl: e.target.value })}
+                        placeholder="https://example.com/banner.png"
+                        className="text-sm"
+                        type="url"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="text-xs h-10 shrink-0 gap-1.5"
+                        onClick={() => document.getElementById("banner-upload")?.click()}
+                      >
+                        <Upload className="h-3.5 w-3.5" />
+                        Upload
+                      </Button>
+                      <input
+                        id="banner-upload"
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            try {
+                              const base64 = await fileToBase64(file);
+                              updateDesignTokens({ bannerUrl: base64 });
+                              toast({ title: "Banner uploaded", description: `${file.name} has been uploaded.` });
+                            } catch (error) {
+                              toast({ title: "Error", description: "Failed to upload banner.", variant: "destructive" });
+                            }
+                          }
+                        }}
+                      />
+                    </div>
+                  </Field>
+                  {brand.designTokens.bannerUrl && (
+                    <div className="rounded-lg border border-border overflow-hidden bg-muted/30">
+                      <div className="px-3 py-2 border-b border-border bg-muted/50 flex items-center gap-1.5">
+                        <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Banner Preview</span>
+                      </div>
+                      <img
+                        src={brand.designTokens.bannerUrl}
+                        alt="Email banner preview"
+                        className="w-full max-h-40 object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = "none";
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Signature Image */}
+                <div className="pt-2 border-t border-border/60 space-y-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Signature Image
+                  </p>
+                  <Field
+                    label="Signature Image URL"
+                    description="Optional signature image shown at the bottom of every email. Best used for handwritten signatures or logos."
+                  >
+                    <div className="flex gap-2">
+                      <Input
+                        value={brand.designTokens.signatureImageUrl}
+                        onChange={(e) => updateDesignTokens({ signatureImageUrl: e.target.value })}
+                        placeholder="https://example.com/signature.png"
+                        className="text-sm"
+                        type="url"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="text-xs h-10 shrink-0 gap-1.5"
+                        onClick={() => document.getElementById("signature-upload")?.click()}
+                      >
+                        <Upload className="h-3.5 w-3.5" />
+                        Upload
+                      </Button>
+                      <input
+                        id="signature-upload"
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            try {
+                              const base64 = await fileToBase64(file);
+                              updateDesignTokens({ signatureImageUrl: base64 });
+                              toast({ title: "Signature uploaded", description: `${file.name} has been uploaded.` });
+                            } catch (error) {
+                              toast({ title: "Error", description: "Failed to upload signature.", variant: "destructive" });
+                            }
+                          }
+                        }}
+                      />
+                    </div>
+                  </Field>
+                  {brand.designTokens.signatureImageUrl && (
+                    <div className="rounded-lg border border-border overflow-hidden bg-muted/30">
+                      <div className="px-3 py-2 border-b border-border bg-muted/50 flex items-center gap-1.5">
+                        <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Signature Preview</span>
+                      </div>
+                      <div className="p-4 flex items-center justify-center min-h-[80px]">
+                        <img
+                          src={brand.designTokens.signatureImageUrl}
+                          alt="Signature preview"
+                          className="max-h-16 max-w-full object-contain"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = "none";
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </Section>
           </motion.div>

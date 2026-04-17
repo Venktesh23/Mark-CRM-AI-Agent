@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -9,13 +9,15 @@ import {
   XCircle,
   Mail,
   Loader2,
+  Eye,
+  MousePointerClick,
+  Save,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { useBrandStore } from "@/lib/brand-store";
 import {
   Dialog,
   DialogContent,
@@ -76,66 +78,97 @@ function EmailPreviewCard({
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 24 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, delay: index * 0.08 }}
+      transition={{ duration: 0.45, delay: index * 0.08 }}
     >
-      <Card
-        className="cursor-pointer overflow-hidden transition-all hover:shadow-md hover:border-primary/30 hover:-translate-y-0.5 border-border"
+      <div
         onClick={onClick}
+        className="group cursor-pointer rounded-xl border border-border bg-card shadow-sm hover:shadow-lg hover:border-primary/40 hover:-translate-y-1 transition-all duration-200 overflow-hidden"
       >
-        <CardHeader className="pb-2 px-5 pt-5">
-          <div className="flex items-start justify-between gap-2">
-            <CardTitle className="text-sm font-semibold leading-tight text-foreground flex-1">
-              {email.subject}
-            </CardTitle>
-            {fullyApproved && (
-              <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0 mt-0.5" />
-            )}
+        {/* Card top: index badge + subject + approval check */}
+        <div className="px-4 pt-4 pb-3 flex items-start gap-2.5">
+          <span className="shrink-0 mt-[2px] h-5 w-5 flex items-center justify-center rounded-full bg-primary text-primary-foreground text-[10px] font-bold leading-none">
+            {index + 1}
+          </span>
+          <h3 className="text-[13px] font-semibold text-foreground leading-snug line-clamp-2 tracking-tight flex-1 min-w-0">
+            {email.subject}
+          </h3>
+          {fullyApproved && (
+            <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0 mt-[2px]" />
+          )}
+        </div>
+
+        {/* Email client chrome + iframe preview */}
+        <div className="mx-4 mb-3 rounded-lg overflow-hidden border border-border/70 shadow-[0_1px_4px_rgba(0,0,0,0.06)]">
+          {/* Fake email-client toolbar */}
+          <div className="flex items-center gap-1.5 px-3 py-[7px] bg-[#f2f2f2] border-b border-border/50">
+            <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" />
+            <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" />
+            <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
+            <div className="flex-1 h-3.5 mx-2 rounded-sm bg-white/80 border border-black/8" />
           </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="relative h-[180px] overflow-hidden border-t border-border">
+
+          {/* iframe with bottom gradient fade */}
+          <div className="relative bg-white" style={{ height: 176 }}>
             <iframe
               srcDoc={email.htmlContent}
-              className="pointer-events-none h-[600px] w-[600px] origin-top-left scale-[0.5]"
+              className="pointer-events-none absolute top-0 left-0 origin-top-left"
+              style={{ width: 640, height: 528, transform: "scale(0.5)", transformOrigin: "top left" }}
               sandbox=""
               title={email.subject}
             />
-          </div>
-          <div className="border-t border-border px-5 py-3 flex items-center justify-between">
-            <p className="text-xs text-muted-foreground line-clamp-1 flex-1 min-w-0 mr-3">
-              <span className="font-medium text-foreground">Target:</span>{" "}
-              {email.summary.targetGroup}
-            </p>
-            <div className="flex gap-1.5 shrink-0">
-              <span
-                className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                  approvalState?.legal
-                    ? "bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400"
-                    : "bg-muted text-muted-foreground"
-                }`}
-              >
-                Legal
-              </span>
-              <span
-                className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                  approvalState?.marketing
-                    ? "bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400"
-                    : "bg-muted text-muted-foreground"
-                }`}
-              >
-                Mktg
+            {/* Gradient fade — masks dead white space at the bottom */}
+            <div
+              className="absolute bottom-0 left-0 right-0 h-20 pointer-events-none"
+              style={{ background: "linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(255,255,255,0.95) 100%)" }}
+            />
+            {/* Hover CTA */}
+            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+              <span className="flex items-center gap-1.5 bg-primary text-primary-foreground text-xs font-semibold px-4 py-1.5 rounded-full shadow-md">
+                <Pencil className="h-3 w-3" />
+                Open & Edit
               </span>
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+
+        {/* Footer: audience + approval pills */}
+        <div className="px-4 pb-4 space-y-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground shrink-0">To</span>
+            <span className="text-xs text-muted-foreground truncate">{email.summary.targetGroup}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span
+              className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                approvalState?.legal
+                  ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800"
+                  : "bg-muted/60 text-muted-foreground border-border"
+              }`}
+            >
+              Legal
+            </span>
+            <span
+              className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                approvalState?.marketing
+                  ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800"
+                  : "bg-muted/60 text-muted-foreground border-border"
+              }`}
+            >
+              Marketing
+            </span>
+          </div>
+        </div>
+      </div>
     </motion.div>
   );
 }
 
-// ── Email detail modal (Preview / Edit / Approve) ─────────────────────────
+// ── Email detail modal (Preview / Edit / Summary / Approve) ──────────────
+
+type DetailTab = "preview" | "edit" | "summary" | "approve";
+type EditMode  = "ai" | "manual";
 
 function EmailModal({
   emailId,
@@ -149,263 +182,398 @@ function EmailModal({
   onClose: () => void;
 }) {
   const { campaigns, updateEmailHtml, updateApproval } = useCampaignsStore();
+  const brand = useBrandStore((s) => s.brand);
   const campaign = campaigns.find((c) => c.id === campaignId);
-  const email = emailId
-    ? campaign?.emails.find((e) => e.id === emailId) ?? null
-    : null;
+  const email    = emailId ? campaign?.emails.find((e) => e.id === emailId) ?? null : null;
   const approval = emailId
-    ? campaign?.approvals[emailId] ?? {
-        legal: false,
-        marketing: false,
-        notes: "",
-      }
+    ? campaign?.approvals[emailId] ?? { legal: false, marketing: false, notes: "" }
     : { legal: false, marketing: false, notes: "" };
 
-  const [editPrompt, setEditPrompt] = useState("");
-  const [isEditing, setIsEditing] = useState(false);
+  const [activeTab,  setActiveTab]  = useState<DetailTab>("preview");
+  const [editMode,   setEditMode]   = useState<EditMode>("ai");
+  const [aiPrompt,   setAiPrompt]   = useState("");
+  const [isEditing,  setIsEditing]  = useState(false);
+  const [editError,  setEditError]  = useState<string | null>(null);
+  const [displayHtml, setDisplayHtml] = useState("");
+  const editableIframeRef = useRef<HTMLIFrameElement>(null);
+
+  useEffect(() => {
+    if (email) {
+      setDisplayHtml(email.htmlContent);
+      setActiveTab("preview");
+      setAiPrompt("");
+      setEditError(null);
+    }
+  }, [email?.id]);
+
+  const bannerBlock = useMemo(() => {
+    const url = brand.designTokens.bannerUrl;
+    return url
+      ? `<img src="${url}" alt="Campaign banner" style="width:100%;max-width:100%;display:block;" />`
+      : `<div style="box-sizing:border-box;width:100%;height:140px;background:linear-gradient(135deg,#f5f7ff 0%,#eef0ff 100%);border-bottom:2px dashed #c7d2fe;display:table;text-align:center;font-family:Arial,sans-serif;">` +
+        `<div style="display:table-cell;vertical-align:middle;padding:20px;">` +
+        `<p style="margin:0 0 6px;font-size:11px;font-weight:700;color:#6366f1;text-transform:uppercase;letter-spacing:0.1em;">BANNER PLACEHOLDER</p>` +
+        `<p style="margin:0;font-size:10px;color:#818cf8;">Add a banner image in Brand &rarr; Design Settings</p>` +
+        `</div></div>`;
+  }, [brand.designTokens.bannerUrl]);
+
+  const viewHtml = useMemo(() => {
+    if (!displayHtml) return displayHtml;
+    return displayHtml.includes("<body")
+      ? displayHtml.replace(/<body([^>]*)>/i, `<body$1>${bannerBlock}`)
+      : bannerBlock + displayHtml;
+  }, [displayHtml, bannerBlock]);
 
   if (!email) return null;
 
-  const handleEdit = async () => {
-    if (!editPrompt.trim()) return;
+  const handleAiEdit = async () => {
+    if (!aiPrompt.trim()) return;
     setIsEditing(true);
+    setEditError(null);
     try {
-      const updated = await editEmail(
-        email.id,
-        email.htmlContent,
-        email.subject,
-        editPrompt
-      );
+      const updated = await editEmail(email.id, displayHtml, email.subject, aiPrompt);
+      setDisplayHtml(updated);
       updateEmailHtml(campaignId, email.id, updated);
-      setEditPrompt("");
-      toast({
-        title: "Email updated",
-        description: "Changes applied successfully.",
-      });
+      setAiPrompt("");
+      toast({ title: "Email updated", description: "AI changes applied." });
     } catch (err) {
-      toast({
-        title: "Edit failed",
-        description: getUserErrorMessage(
-          err,
-          "Could not apply edit. Try again or enable local-only mode in Settings."
-        ),
-        variant: "destructive",
-      });
+      setEditError(getUserErrorMessage(err, "Could not apply edit. Try again or enable local-only mode in Settings."));
     } finally {
       setIsEditing(false);
     }
   };
 
+  const editableHtml = useMemo(() => {
+    if (!displayHtml) return "";
+    return displayHtml.replace(/<body([^>]*)>/i, '<body$1 contenteditable="true" style="outline:none;">');
+  }, [displayHtml]);
+
+  const handleManualSave = () => {
+    const iframe = editableIframeRef.current;
+    if (!iframe?.contentDocument) return;
+    const raw = iframe.contentDocument.documentElement.outerHTML;
+    const clean = raw.replace(/\s*contenteditable="true"/gi, '').replace(/\s*style="outline:none;"/gi, '');
+    setDisplayHtml(clean);
+    updateEmailHtml(campaignId, email.id, clean);
+    toast({ title: "Email saved", description: "Your edits have been saved." });
+  };
+
+  const handleModeSwitch = (mode: EditMode) => {
+    if (editMode === "manual" && mode === "ai") {
+      const iframe = editableIframeRef.current;
+      if (iframe?.contentDocument) {
+        const raw = iframe.contentDocument.documentElement.outerHTML;
+        setDisplayHtml(raw.replace(/\s*contenteditable="true"/gi, '').replace(/\s*style="outline:none;"/gi, ''));
+      }
+    }
+    setEditMode(mode);
+  };
+
+  const senderDomain = brand.brandName
+    ? brand.brandName.toLowerCase().replace(/\s+/g, "") + ".com"
+    : "yourbrand.com";
+
+  const tabs: { id: DetailTab; label: string; icon: React.ReactNode }[] = [
+    { id: "preview",  label: "Preview",  icon: <Eye className="h-3.5 w-3.5" /> },
+    { id: "edit",     label: "Edit",     icon: <Pencil className="h-3.5 w-3.5" /> },
+    { id: "summary",  label: "Summary",  icon: <Sparkles className="h-3.5 w-3.5" /> },
+    { id: "approve",  label: "Approve",  icon: <CheckCircle2 className="h-3.5 w-3.5" /> },
+  ];
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-6xl h-[85vh] flex flex-col p-0">
-        <DialogHeader className="px-6 py-4 border-b border-border flex-shrink-0">
-          <DialogTitle className="text-base font-semibold">
-            {email.subject}
-          </DialogTitle>
+      <DialogContent className="max-w-6xl h-[90vh] flex flex-col p-0 gap-0 overflow-hidden rounded-xl">
+
+        {/* ── Header ── */}
+        <DialogHeader className="flex-shrink-0 border-b border-border bg-card">
+          <div className="flex items-center gap-3 px-6 py-4">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+              <Mail className="h-4 w-4 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <DialogTitle className="text-sm font-semibold text-foreground truncate">
+                {email.subject}
+              </DialogTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {approval.legal && approval.marketing ? "✓ Fully approved" : "Pending approval"}
+              </p>
+            </div>
+          </div>
+
+          {/* Tab nav — underline style */}
+          <div className="flex border-t border-border/60 px-6">
+            {tabs.map(({ id, label, icon }) => (
+              <button
+                key={id}
+                onClick={() => setActiveTab(id)}
+                className={`flex items-center gap-2 px-4 py-3 text-xs font-semibold border-b-2 transition-colors -mb-px ${
+                  activeTab === id
+                    ? "border-primary text-primary"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {icon}
+                {label}
+              </button>
+            ))}
+          </div>
           <DialogDescription className="sr-only">
-            Campaign email preview with summary, edit actions, and approvals.
+            Campaign email preview with edit actions and approval workflow.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-1 overflow-hidden">
-          {/* Email iframe */}
-          <div className="flex-1 overflow-auto">
-            <iframe
-              srcDoc={email.htmlContent}
-              className="h-full w-full"
-              sandbox=""
-              title="Email preview"
-            />
-          </div>
+        {/* ── Content ── */}
+        <div className="flex-1 overflow-hidden min-h-0">
 
-          {/* Side panel */}
-          <div className="w-[300px] shrink-0 border-l border-border bg-muted/30 flex flex-col overflow-hidden">
-            <Tabs defaultValue="summary" className="flex flex-col h-full">
-              <div className="px-4 pt-4 pb-2 shrink-0">
-                <TabsList className="w-full">
-                  <TabsTrigger value="summary" className="flex-1 gap-1 text-xs">
-                    <Sparkles className="h-3 w-3" />
-                    Summary
-                  </TabsTrigger>
-                  <TabsTrigger value="edit" className="flex-1 gap-1 text-xs">
-                    <Pencil className="h-3 w-3" />
-                    Edit
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="approve"
-                    className="flex-1 gap-1 text-xs"
-                  >
-                    <CheckCircle2 className="h-3 w-3" />
-                    Approve
-                  </TabsTrigger>
-                </TabsList>
+          {/* PREVIEW TAB */}
+          {activeTab === "preview" && (
+            <div className="h-full overflow-auto bg-[#f0f2f5] p-6">
+              <div className="max-w-[620px] mx-auto">
+                <div className="rounded-t-xl bg-card border border-border border-b-0 overflow-hidden shadow-sm">
+                  {/* Window chrome */}
+                  <div className="flex items-center gap-1.5 px-4 py-3 bg-muted/60 border-b border-border/60">
+                    <span className="h-3 w-3 rounded-full bg-[#ff5f57]" />
+                    <span className="h-3 w-3 rounded-full bg-[#febc2e]" />
+                    <span className="h-3 w-3 rounded-full bg-[#28c840]" />
+                    <div className="flex-1 h-5 mx-3 rounded-md bg-background border border-border/50 flex items-center px-2">
+                      <span className="text-[10px] text-muted-foreground truncate">no-reply@{senderDomain}</span>
+                    </div>
+                  </div>
+
+                  {/* Sender row */}
+                  <div className="px-5 py-4 border-b border-border/60 flex items-start gap-3">
+                    <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0 text-sm font-bold text-primary">
+                      {(brand.brandName?.[0] ?? "M").toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-baseline gap-2 flex-wrap">
+                        <span className="text-sm font-semibold text-foreground">{brand.brandName || "Your Brand"}</span>
+                        <span className="text-xs text-muted-foreground">&lt;no-reply@{senderDomain}&gt;</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">to recipient@example.com</p>
+                    </div>
+                    <p className="text-xs text-muted-foreground shrink-0">Just now</p>
+                  </div>
+
+                  {/* Subject */}
+                  <div className="px-5 py-3 border-b border-border/40 bg-muted/20">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1">Subject</p>
+                    <p className="text-base font-semibold text-foreground leading-snug">{email.subject}</p>
+                  </div>
+                </div>
+
+                {/* Email body */}
+                <div className="border border-border border-t-0 rounded-b-xl overflow-hidden bg-white shadow-sm">
+                  <iframe
+                    srcDoc={viewHtml}
+                    className="w-full block"
+                    style={{ minHeight: 480, height: 560 }}
+                    sandbox=""
+                    title="Email preview"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* EDIT TAB */}
+          {activeTab === "edit" && (
+            <div className="flex h-full overflow-hidden">
+              {/* Left: readonly preview (AI) or editable iframe (Direct) */}
+              <div className="flex-1 overflow-auto bg-muted/20 min-w-0">
+                {editMode === "ai" ? (
+                  <iframe srcDoc={displayHtml} className="h-full w-full min-h-[500px]" sandbox="" title="Live preview" />
+                ) : (
+                  <iframe
+                    ref={editableIframeRef}
+                    srcDoc={editableHtml}
+                    className="h-full w-full min-h-[500px] cursor-text"
+                    title="Editable email"
+                  />
+                )}
               </div>
 
-              {/* Summary */}
-              <TabsContent
-                value="summary"
-                className="flex-1 overflow-auto px-5 pb-5 mt-0"
-              >
-                <div className="space-y-4 pt-2">
+              {/* Right: edit panel */}
+              <div className="w-[360px] shrink-0 border-l border-border bg-card flex flex-col overflow-hidden">
+                {/* Mode toggle */}
+                <div className="px-5 pt-5 pb-4 border-b border-border/60 flex-shrink-0">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2.5">Edit Mode</p>
+                  <div className="grid grid-cols-2 gap-1.5 p-1 bg-muted rounded-lg">
+                    <button
+                      onClick={() => handleModeSwitch("ai")}
+                      className={`flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-md transition-all ${
+                        editMode === "ai" ? "bg-card text-foreground shadow-sm border border-border" : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />AI Edit
+                    </button>
+                    <button
+                      onClick={() => handleModeSwitch("manual")}
+                      className={`flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-md transition-all ${
+                        editMode === "manual" ? "bg-card text-foreground shadow-sm border border-border" : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <MousePointerClick className="h-3.5 w-3.5" />Direct Edit
+                    </button>
+                  </div>
+                </div>
+
+                {/* AI Edit */}
+                {editMode === "ai" && (
+                  <div className="flex flex-col gap-4 flex-1 overflow-auto px-5 py-5 min-h-0">
+                    <div>
+                      <p className="text-xs font-semibold text-foreground mb-1">AI Instructions</p>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Describe the changes you want. Mark regenerates the email from your instructions.
+                      </p>
+                    </div>
+                    <Textarea
+                      placeholder={"\"Make the tone more formal\"\n\"Add a 20% discount code section\"\n\"Shorten the body to 3 sentences\""}
+                      value={aiPrompt}
+                      onChange={(e) => setAiPrompt(e.target.value)}
+                      className="flex-1 min-h-[160px] text-sm resize-none"
+                      disabled={isEditing}
+                    />
+                    {editError && (
+                      <div className="flex items-start gap-2 rounded-lg bg-destructive/10 border border-destructive/20 px-3 py-2.5">
+                        <XCircle className="h-3.5 w-3.5 mt-0.5 shrink-0 text-destructive" />
+                        <p className="text-xs text-destructive leading-relaxed">{editError}</p>
+                      </div>
+                    )}
+                    <Button onClick={handleAiEdit} disabled={!aiPrompt.trim() || isEditing} className="w-full">
+                      {isEditing ? <><Loader2 className="h-4 w-4 animate-spin" />Applying…</> : <><Sparkles className="h-4 w-4" />Apply with AI</>}
+                    </Button>
+                  </div>
+                )}
+
+                {/* Direct Edit */}
+                {editMode === "manual" && (
+                  <div className="flex flex-col gap-5 flex-1 px-5 py-5">
+                    <div>
+                      <p className="text-xs font-semibold text-foreground mb-1">Direct Text Editing</p>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Click on any text in the email preview to place your cursor, then type to edit it directly.
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-border bg-muted/30 px-4 py-3.5 space-y-2">
+                      <p className="text-xs font-semibold text-foreground">Tips</p>
+                      <ul className="text-xs text-muted-foreground space-y-1.5 leading-relaxed">
+                        <li>• Click any text to place your cursor</li>
+                        <li>• Select text and type to replace it</li>
+                        <li>• Press Ctrl+Z (⌘Z) to undo</li>
+                        <li>• Hit Save when done — changes persist</li>
+                      </ul>
+                    </div>
+                    <div className="flex-1" />
+                    <Button onClick={handleManualSave} className="w-full">
+                      <Save className="h-4 w-4" />
+                      Save Changes
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* SUMMARY TAB */}
+          {activeTab === "summary" && (
+            <div className="flex h-full overflow-hidden">
+              <div className="flex-1 overflow-auto bg-muted/20">
+                <iframe srcDoc={displayHtml} className="h-full w-full min-h-[500px]" sandbox="" title="Email preview" />
+              </div>
+              <div className="w-[320px] shrink-0 border-l border-border bg-card overflow-auto px-5 py-6">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-5">
+                  AI Generation Summary
+                </p>
+                <div className="space-y-6">
                   {[
-                    { label: "Target Group", value: email.summary.targetGroup },
-                    {
-                      label: "Regional Adaptation",
-                      value: email.summary.regionalAdaptation,
-                    },
-                    {
-                      label: "Tone & Style",
-                      value: email.summary.toneDecision,
-                    },
-                    {
-                      label: "Legal Compliance",
-                      value: email.summary.legalConsiderations,
-                    },
+                    { label: "Target Group",        value: email.summary.targetGroup },
+                    { label: "Regional Adaptation", value: email.summary.regionalAdaptation },
+                    { label: "Tone & Style",        value: email.summary.toneDecision },
+                    { label: "Legal Compliance",    value: email.summary.legalConsiderations },
                   ].map((item) => (
                     <div key={item.label}>
-                      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                        {item.label}
-                      </p>
-                      <p className="text-xs text-foreground leading-relaxed">
-                        {item.value}
-                      </p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5">{item.label}</p>
+                      <p className="text-xs text-foreground leading-relaxed">{item.value}</p>
                     </div>
                   ))}
                 </div>
-              </TabsContent>
+              </div>
+            </div>
+          )}
 
-              {/* Edit */}
-              <TabsContent
-                value="edit"
-                className="flex-1 flex flex-col overflow-auto px-5 pb-5 mt-0"
-              >
-                <div className="flex flex-col gap-4 pt-2 flex-1">
-                  <p className="text-xs text-muted-foreground">
-                    Describe the changes you'd like. Mark will regenerate this
-                    email based on your instructions.
-                  </p>
-                  <Textarea
-                    placeholder="e.g. Make the tone more formal, add a discount code section..."
-                    value={editPrompt}
-                    onChange={(e) => setEditPrompt(e.target.value)}
-                    className="min-h-[140px] flex-1 text-xs"
-                  />
-                  <Button
-                    size="sm"
-                    onClick={handleEdit}
-                    disabled={!editPrompt.trim() || isEditing}
-                    className="w-full"
-                  >
-                    {isEditing ? (
-                      <>
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        Updating...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="h-3.5 w-3.5" />
-                        Apply Changes
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </TabsContent>
-
-              {/* Approve */}
-              <TabsContent
-                value="approve"
-                className="flex-1 flex flex-col overflow-auto px-5 pb-5 mt-0"
-              >
-                <div className="flex flex-col gap-5 pt-2">
-                  <p className="text-xs text-muted-foreground">
-                    Mark approvals below. Both are required before this campaign
-                    can be sent.
+          {/* APPROVE TAB */}
+          {activeTab === "approve" && (
+            <div className="flex h-full overflow-hidden">
+              <div className="flex-1 overflow-auto bg-muted/20">
+                <iframe srcDoc={displayHtml} className="h-full w-full min-h-[500px]" sandbox="" title="Email preview" />
+              </div>
+              <div className="w-[320px] shrink-0 border-l border-border bg-card overflow-auto px-5 py-6">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-5">
+                  Approval Workflow
+                </p>
+                <div className="space-y-6">
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Both Legal and Marketing approval are required before this campaign can be sent.
                   </p>
 
                   <div className="space-y-4">
-                    {/* Legal */}
-                    <label className="flex items-start gap-3 cursor-pointer">
-                      <Checkbox
-                        checked={approval.legal}
-                        onCheckedChange={(v) =>
-                          updateApproval(campaignId, email.id, {
-                            legal: !!v,
-                          })
-                        }
-                        className="mt-0.5"
-                      />
-                      <div>
-                        <p className="text-xs font-semibold text-foreground">
-                          Legal Approval
-                        </p>
-                        <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
-                          Content is compliant with applicable regulations and
-                          brand guidelines.
-                        </p>
-                      </div>
-                    </label>
-
-                    {/* Marketing */}
-                    <label className="flex items-start gap-3 cursor-pointer">
-                      <Checkbox
-                        checked={approval.marketing}
-                        onCheckedChange={(v) =>
-                          updateApproval(campaignId, email.id, {
-                            marketing: !!v,
-                          })
-                        }
-                        className="mt-0.5"
-                      />
-                      <div>
-                        <p className="text-xs font-semibold text-foreground">
-                          Marketing Approval
-                        </p>
-                        <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
-                          Messaging, tone, and offer are aligned with campaign
-                          goals.
-                        </p>
-                      </div>
-                    </label>
+                    {[
+                      {
+                        field: "legal" as const,
+                        title: "Legal Approval",
+                        desc: "Content is compliant with applicable regulations and brand guidelines.",
+                      },
+                      {
+                        field: "marketing" as const,
+                        title: "Marketing Approval",
+                        desc: "Messaging, tone, and offer are aligned with campaign goals.",
+                      },
+                    ].map(({ field, title, desc }) => (
+                      <label key={field} className="flex items-start gap-3 cursor-pointer group/check">
+                        <Checkbox
+                          checked={approval[field]}
+                          onCheckedChange={(v) => updateApproval(campaignId, email.id, { [field]: !!v })}
+                          className="mt-0.5"
+                        />
+                        <div>
+                          <p className="text-xs font-semibold text-foreground group-hover/check:text-primary transition-colors">
+                            {title}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">{desc}</p>
+                        </div>
+                      </label>
+                    ))}
                   </div>
 
-                  {/* Notes */}
                   <div className="space-y-2">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                       Reviewer Notes
                     </p>
                     <Textarea
                       placeholder="Add any notes for the record..."
                       value={approval.notes}
-                      onChange={(e) =>
-                        updateApproval(campaignId, email.id, {
-                          notes: e.target.value,
-                        })
-                      }
-                      className="min-h-[90px] text-xs"
+                      onChange={(e) => updateApproval(campaignId, email.id, { notes: e.target.value })}
+                      className="min-h-[80px] text-xs resize-none"
                     />
                   </div>
 
-                  {/* Status indicator */}
                   {approval.legal && approval.marketing ? (
-                    <div className="flex items-center gap-2 rounded-md bg-green-100 dark:bg-green-900/20 px-3 py-2.5">
-                      <CheckCircle2 className="h-4 w-4 text-green-700 dark:text-green-400 shrink-0" />
-                      <p className="text-xs font-medium text-green-700 dark:text-green-400">
-                        This email is approved
-                      </p>
+                    <div className="flex items-center gap-2.5 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 px-4 py-3">
+                      <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />
+                      <p className="text-xs font-semibold text-green-700 dark:text-green-400">This email is approved</p>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-2 rounded-md bg-muted px-3 py-2.5">
+                    <div className="flex items-center gap-2.5 rounded-lg bg-muted border border-border px-4 py-3">
                       <XCircle className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <p className="text-xs text-muted-foreground">
-                        Pending approval
-                      </p>
+                      <p className="text-xs text-muted-foreground">Pending approval</p>
                     </div>
                   )}
                 </div>
-              </TabsContent>
-            </Tabs>
-          </div>
+              </div>
+            </div>
+          )}
+
         </div>
       </DialogContent>
     </Dialog>

@@ -126,6 +126,15 @@
     box-shadow: 0 0 60px -15px hsl(13 93% 55% / 0.15);
   }
 
+  .auth-btn-glow {
+    box-shadow: 0 0 20px hsl(13 93% 55% / 0.4), 0 0 40px hsl(13 93% 55% / 0.2) !important;
+    transition: box-shadow 0.3s ease;
+  }
+
+  .auth-btn-glow:hover {
+    box-shadow: 0 0 30px hsl(13 93% 55% / 0.6), 0 0 60px hsl(13 93% 55% / 0.3) !important;
+  }
+
   .glass-card {
     backdrop-filter: blur(16px);
     background: hsl(0 0% 100% / 0.85);

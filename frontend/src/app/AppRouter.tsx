@@ -9,9 +9,10 @@ import SendPage from "@/pages/SendPage";
 import BrandPage from "@/pages/BrandPage";
 import SettingsPage from "@/pages/SettingsPage";
 import NotFound from "@/pages/NotFound";
+import LandingPage from "@/features/auth/LandingPage";
 import LoginPage from "@/features/auth/LoginPage";
 import SignupPage from "@/features/auth/SignupPage";
-import LandingPage from "@/features/auth/LandingPage";
+import ForgotPasswordPage from "@/features/auth/ForgotPasswordPage";
 import { useCloudAuthStore } from "@/integrations/supabase/cloud-auth-store";
 import { useCloudCampaigns } from "@/features/campaigns/use-cloud-campaigns";
 
@@ -56,8 +57,9 @@ export function AppRouter() {
         <Route path="/welcome" element={<LandingPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/onboarding" element={<Navigate to="/signup" replace />} />
-        <Route path="/cloud-auth" element={<Navigate to="/login" replace />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/onboarding" element={<Navigate to="/welcome" replace />} />
+        <Route path="/cloud-auth" element={<Navigate to="/welcome" replace />} />
         <Route path="/*" element={<ProtectedApp />} />
       </Routes>
     </BrowserRouter>

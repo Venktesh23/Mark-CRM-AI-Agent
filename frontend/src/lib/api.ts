@@ -37,8 +37,13 @@ export interface BrandContextPayload {
     accentColor: string;
     fontFamilyHeading: string;
     fontFamilyBody: string;
+    fontSizeBase: string;
+    lineHeight: string;
+    spacingUnit: string;
     borderRadius: string;
     logoUrl: string;
+    bannerUrl: string;
+    signatureImageUrl: string;
   };
 }
 

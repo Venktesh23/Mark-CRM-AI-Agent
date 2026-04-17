@@ -11,8 +11,13 @@ export interface BrandDesignTokens {
   accentColor: string;
   fontFamilyHeading: string;
   fontFamilyBody: string;
+  fontSizeBase: string;
+  lineHeight: string;
+  spacingUnit: string;
   borderRadius: string;
   logoUrl: string;
+  bannerUrl: string;
+  signatureImageUrl: string;
 }
 
 export interface BrandConfig {
@@ -37,8 +42,13 @@ export const DEFAULT_BRAND: BrandConfig = {
     accentColor: "#f59e0b",
     fontFamilyHeading: "Georgia, serif",
     fontFamilyBody: "Arial, sans-serif",
+    fontSizeBase: "16px",
+    lineHeight: "1.6",
+    spacingUnit: "8px",
     borderRadius: "6px",
     logoUrl: "",
+    bannerUrl: "",
+    signatureImageUrl: "",
   },
 };
 

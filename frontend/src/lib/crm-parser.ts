@@ -262,7 +262,11 @@ export function parseCrmData(data: CrmData): Partial<BrandConfig> {
   if (desc.ACCENT_COLOR) tokens.accentColor = desc.ACCENT_COLOR;
   if (desc.FONT_HEADING) tokens.fontFamilyHeading = desc.FONT_HEADING;
   if (desc.FONT_BODY) tokens.fontFamilyBody = desc.FONT_BODY;
+  if (desc.FONT_SIZE_BASE) tokens.fontSizeBase = desc.FONT_SIZE_BASE;
+  if (desc.LINE_HEIGHT) tokens.lineHeight = desc.LINE_HEIGHT;
+  if (desc.SPACING_UNIT) tokens.spacingUnit = desc.SPACING_UNIT;
   if (desc.BORDER_RADIUS) tokens.borderRadius = desc.BORDER_RADIUS;
+  if (desc.SIGNATURE_IMAGE_URL) tokens.signatureImageUrl = desc.SIGNATURE_IMAGE_URL;
   // hs_logo_url (native HubSpot field) takes priority over LOGO_URL in description
   const logoUrl = first.hs_logo_url || desc.LOGO_URL;
   if (logoUrl) tokens.logoUrl = logoUrl;
@@ -293,5 +297,9 @@ REQUIRED: phrases, always, included
 LEGAL_FOOTER: © 2025 Your Company. All rights reserved.
 FONT_HEADING: Georgia, serif
 FONT_BODY: Arial, sans-serif
+FONT_SIZE_BASE: 16px
+LINE_HEIGHT: 1.6
+SPACING_UNIT: 8px
 BORDER_RADIUS: 6px
-LOGO_URL: https://your-cdn.com/logo.png`;
+LOGO_URL: https://your-cdn.com/logo.png
+SIGNATURE_IMAGE_URL: https://your-cdn.com/signature.png`;

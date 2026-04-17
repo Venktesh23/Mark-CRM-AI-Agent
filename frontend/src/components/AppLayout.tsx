@@ -163,9 +163,9 @@ export function AppLayout({ children }: AppLayoutProps) {
       <div
         ref={sidebarRef}
         className={`fixed top-0 left-0 z-40 h-screen flex flex-col bg-sidebar border-r border-sidebar-border shadow-xl
-          transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]
+          transition-transform duration-300
           ${open ? "translate-x-0" : "-translate-x-full"}`}
-        style={{ width: "14rem" }}
+        style={{ width: "14rem", transitionTimingFunction: "cubic-bezier(0.22, 1, 0.36, 1)" }}
       >
         <SidebarContent
           hubspotConnected={hubspotConnected}
